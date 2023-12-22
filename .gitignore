@@ -4,3 +4,4 @@ venv
 *.nef
 *.cr2
 *.raf
+__pycache__
