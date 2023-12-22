@@ -3,6 +3,34 @@ import logging
 from typing import Callable
 from PySide6 import QtCore, QtWidgets, QtGui
 
+stylesheet = """
+ImageViewer {
+    background-color: #ffffff;
+}
+
+ImageViewer QGraphicsView {
+    background-color: #ffffff;
+}
+
+ImageViewer QMenu {
+    background-color: black;
+    border: 1px solid #222;
+}
+
+ImageViewer QMenu::item {
+    background-color: black;
+    padding: 5px 10px;
+}
+
+ImageViewer QMenu::item::selected {
+    background-color: #222;
+}
+
+ImageViewer QMenu::separator {
+    height: 15px;
+}
+"""
+
 
 class ImageViewer(QtWidgets.QWidget):
     layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
@@ -17,6 +45,7 @@ class ImageViewer(QtWidgets.QWidget):
         super(ImageViewer, self).__init__(parent)
 
         self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
 
         self._img_scale = 1.0
         self._gfxview = QtWidgets.QGraphicsView()
@@ -29,19 +58,21 @@ class ImageViewer(QtWidgets.QWidget):
             QtWidgets.QGraphicsView.ViewportAnchor.NoAnchor
         )
 
-        self._gfxview.setFrameStyle(QtWidgets.QFrame.Shape.NoFrame)
+        self._gfxview.setFrameStyle(QtWidgets.QFrame.Shape.Box)
+        self._gfxview.setLineWidth(20)
 
         self._gfxview.wheelEvent = self._on_scroll
         self.resizeEvent = self._on_resize
         self.contextMenuEvent = self._on_context
 
-        self.layout.addWidget(self._gfxview)
-
-        # Fullscreen bindings
-        QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen
+        self._gfxview.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
+        self._gfxview.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+
+        self.layout.addWidget(self._gfxview)
 
         # Zoom bindings
         QtGui.QShortcut(
@@ -80,18 +111,18 @@ class ImageViewer(QtWidgets.QWidget):
     def _on_context(self, event: QtGui.QContextMenuEvent):
         menu = QtWidgets.QMenu(self)
 
-        menu.addAction("Discard this image")  # TODO
+        menu.addAction("Discard this image")
         menu.addSeparator()
 
-        menu.addAction("Prune another folder")  # TODO
-        menu.addAction("Open discarded in file viewer")  # TODO
+        menu.addAction("Prune another folder")
+        menu.addAction("Open discarded in file viewer")
 
-        if self.windowState() == QtCore.Qt.WindowState.WindowFullScreen:
-            menu.addAction("Exit fullscreen", self._fullscreen)
+        if self.parent().windowState() == QtCore.Qt.WindowState.WindowFullScreen:  # type: ignore
+            menu.addAction("Exit fullscreen", self.parent().fullscreen)  # type: ignore
         else:
-            menu.addAction("Fullscreen", self._fullscreen)
+            menu.addAction("Fullscreen", self.parent().fullscreen)  # type: ignore
 
-        menu.addAction("Help")  # TODO
+        menu.addAction("Help")
 
         menu.exec(event.globalPos())
 
@@ -103,7 +134,7 @@ class ImageViewer(QtWidgets.QWidget):
             self._gfxview.scene().width() < self._gfxview.viewport().width()
             or self._gfxview.scene().height() < self._gfxview.viewport().height()
         ):
-            self._fit_to_size(self._gfxview.width(), self._gfxview.height())
+            self._fit_to_viewport()
 
     def _on_scroll(self, event: QtGui.QWheelEvent):
         _d = event.angleDelta().y()
@@ -151,15 +182,9 @@ class ImageViewer(QtWidgets.QWidget):
         self._img_scale = min(sf_width, sf_height)
 
         gfxscene = QtWidgets.QGraphicsScene()
-        self._pixmap_in_scene = gfxscene.addPixmap(
-            QtGui.QPixmap.fromImage(self._image).scaled(
-                self._image.width() * self._img_scale - 10,
-                self._image.height() * self._img_scale - 10,
-                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation,
-            )
-        )
+        self._pixmap_in_scene = gfxscene.addPixmap(QtGui.QPixmap.fromImage(self._image))
         self._gfxview.setScene(gfxscene)
+        self._fit_to_viewport()
 
     def _translate(self, x, y):
         if self._gfxview is None:
@@ -171,7 +196,10 @@ class ImageViewer(QtWidgets.QWidget):
         if self._gfxview is None:
             raise Exception
 
-        self._fit_to_size(self._gfxview.width(), self._gfxview.height())
+        self._fit_to_size(
+            self._gfxview.viewport().width(),
+            self._gfxview.viewport().height(),
+        )
 
     def _fit_to_size(self, w, h):
         if (
@@ -193,8 +221,8 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._pixmap_in_scene.setPixmap(
             QtGui.QPixmap.fromImage(self._image).scaled(
-                new_width - 10,
-                new_height - 10,
+                new_width,
+                new_height,
                 QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                 QtCore.Qt.TransformationMode.SmoothTransformation,
             )
@@ -220,7 +248,7 @@ class ImageViewer(QtWidgets.QWidget):
         vw_height = viewport.height()
         if (
             self._image.width() * new_img_scale < vw_width
-            or self._image.height() * new_img_scale < vw_height
+            and self._image.height() * new_img_scale < vw_height
         ) and scale_factor < 1:
             logging.debug(
                 "New dimensions would be smaller than viewport, fitting to viewport instead"
@@ -260,7 +288,45 @@ class ImageViewer(QtWidgets.QWidget):
             "PIXMAP size", self._pixmap_in_scene.pixmap().size()
         ) if self._pixmap_in_scene else None
 
-    def _fullscreen(self):
+
+class Landing(QtWidgets.QWidget):
+    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
+    placeholder = None
+
+    def __init__(self, parent=None):
+        super(Landing, self).__init__(parent)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.placeholder = QtWidgets.QLabel(self)
+        self.placeholder.setText("Placeholder for landing widget")
+        self.layout.addWidget(self.placeholder)
+
+
+class PhotoPrune(QtWidgets.QWidget):
+    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
+    image_viewer: ImageViewer
+    landing: Landing
+
+    def __init__(self, parent=None):
+        super(PhotoPrune, self).__init__(parent)
+        self.setStyleSheet(stylesheet)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+
+        self.landing = Landing(self)
+        self.image_viewer = ImageViewer(self)
+        self.image_viewer.hide()
+        self.layout.addWidget(self.image_viewer)
+
+        self.layout.addWidget(self.landing)
+
+        # Fullscreen bindings
+        QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self.fullscreen)
+        QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
+
+    def windowState(self):
+        return super().windowState()
+
+    def fullscreen(self):
         if self.windowState() == QtCore.Qt.WindowState.WindowFullScreen:
             if self._last_window_state is not None:
                 self.setWindowState(self._last_window_state)
@@ -278,64 +344,12 @@ class ImageViewer(QtWidgets.QWidget):
                 self.setWindowState(QtCore.Qt.WindowState.WindowNoState)
 
 
-stylesheet = """
-ImageViewer {
-    background-color: #ffffff;
-}
-
-ImageViewer QGraphicsView {
-    background-color: #ffffff;
-}
-
-ImageViewer QScrollBar {
-    background-color: #ffffff;
-}
-
-ImageViewer QAbstractScrollArea::corner {
-    border: none;
-}
-
-ImageViewer QScrollBar::handle {
-    background: #ffffff;
-    border: 1px solid gray;
-}
-
-ImageViewer QScrollBar::add-line {
-    border: none;
-    background: none;
-}
-
-ImageViewer QScrollBar::sub-line {
-    border: none;
-    background: none;
-}
-
-ImageViewer QMenu {
-    background-color: black;
-    border: 1px solid #222;
-}
-
-ImageViewer QMenu::item {
-    background-color: black;
-    padding: 5px 10px;
-}
-
-ImageViewer QMenu::item::selected {
-    background-color: #222;
-}
-
-ImageViewer QMenu::separator {
-    height: 15px;
-}
-"""
-
 if __name__ == "__main__":
     app = QtWidgets.QApplication([])
 
-    widget = ImageViewer()
-    widget.resize(1280, 720)
-    widget.setStyleSheet(stylesheet)
-    widget.show()
-    widget.load_file("test-pic.jpg")
+    photo_prune = PhotoPrune()
+    photo_prune.resize(1280, 720)
+    photo_prune.show()
+    photo_prune.image_viewer.load_file("test-pic.jpg")
 
     sys.exit(app.exec())
