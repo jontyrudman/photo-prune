@@ -14,6 +14,7 @@ class PhotoPrune(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super(PhotoPrune, self).__init__(parent)
+
         self.setStyleSheet(stylesheet)
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
@@ -24,10 +25,10 @@ class PhotoPrune(QtWidgets.QWidget):
         self.layout.addWidget(self.image_viewer)
         self.image_viewer.hide()
 
+        self.fix_size_to_min()
+
         # Fullscreen bindings
-        QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen
-        )
+        QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen)
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
 
         self.landing.confirm_button.clicked.connect(self._switch_to_viewer)
@@ -55,6 +56,9 @@ class PhotoPrune(QtWidgets.QWidget):
         self.setMinimumSize(QtCore.QSize(0, 0))
         self.setMaximumSize(QtCore.QSize(16777215, 16777215))
 
+    def fix_size_to_min(self):
+        self.setFixedSize(self.minimumSizeHint())
+
     @QtCore.Slot()
     def _switch_to_viewer(self):
         self.image_viewer.load_file("test-pic.jpg")
@@ -68,6 +72,7 @@ class PhotoPrune(QtWidgets.QWidget):
     @QtCore.Slot()
     def _switch_to_landing(self):
         # TODO: Img cleanup/viewer destruction
+        self.fix_size_to_min()
         self.image_viewer.hide()
         self.landing.show()
 

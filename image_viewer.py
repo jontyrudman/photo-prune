@@ -35,6 +35,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._set_up_shortcuts()
 
+
     def _set_up_gfxview(self):
         self._gfxview = QtWidgets.QGraphicsView()
         self._gfxview.setBackgroundRole(QtGui.QPalette.ColorRole.Base)

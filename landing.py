@@ -27,8 +27,3 @@ class Landing(QtWidgets.QWidget):
         self.layout.addWidget(self._show_comp_button)
         self.layout.addWidget(self._show_raw_button)
         self.layout.addWidget(self.confirm_button)
-
-        self.showEvent = self._on_show
-
-    def _on_show(self, event: QtGui.QShowEvent):
-        self.parentWidget().setFixedSize(self.minimumSizeHint())
