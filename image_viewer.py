@@ -12,6 +12,9 @@ class ImageViewer(QtWidgets.QWidget):
     _pixmap_in_scene: QtWidgets.QGraphicsPixmapItem | None = None
     _last_window_state: QtCore.Qt.WindowState | None = None
 
+    back_to_landing_sig = QtCore.Signal()
+    fullscreen_sig = QtCore.Signal()
+
     def __init__(self, parent=None):
         super(ImageViewer, self).__init__(parent)
 
@@ -49,7 +52,7 @@ class ImageViewer(QtWidgets.QWidget):
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Equal),
             self,
-            lambda: self._fit_to_viewport(),
+            lambda: self.fit_to_viewport(),
         )
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Plus), self, lambda: self._scale(1.1)
@@ -80,22 +83,26 @@ class ImageViewer(QtWidgets.QWidget):
         # TODO: Implement discard func
 
     def _on_context(self, event: QtGui.QContextMenuEvent):
-        menu = QtWidgets.QMenu(self)
+        self.menu = QtWidgets.QMenu(self)
 
-        menu.addAction("Discard this image")
-        menu.addSeparator()
+        self.menu.addAction("Discard this image")
+        self.menu.addSeparator()
 
-        menu.addAction("Prune another folder")
-        menu.addAction("Open discarded in file viewer")
+        self.menu.addAction("Prune another folder", self.back_to_landing_sig.emit)
+        self.menu.addAction("Open discarded in file viewer")
 
-        if self.parent().windowState() == QtCore.Qt.WindowState.WindowFullScreen:  # type: ignore
-            menu.addAction("Exit fullscreen", self.parent().fullscreen)  # type: ignore
+        if self.parentWidget().windowState() == QtCore.Qt.WindowState.WindowFullScreen:
+            self.fullscreen_action = self.menu.addAction(
+                "Exit fullscreen", self.parentWidget().fullscreen  # type: ignore
+            )
         else:
-            menu.addAction("Fullscreen", self.parent().fullscreen)  # type: ignore
+            self.fullscreen_action = self.menu.addAction(
+                "Fullscreen", self.parentWidget().fullscreen  # type: ignore
+            )
 
-        menu.addAction("Help")
+        self.menu.addAction("Help")
 
-        menu.exec(event.globalPos())
+        self.menu.exec(event.globalPos())
 
     def _on_resize(self, event: QtGui.QResizeEvent):
         if self._gfxview is None or self._gfxview.scene() is None:
@@ -105,12 +112,17 @@ class ImageViewer(QtWidgets.QWidget):
             self._gfxview.scene().width() < self._gfxview.viewport().width()
             or self._gfxview.scene().height() < self._gfxview.viewport().height()
         ):
-            self._fit_to_viewport()
+            self.fit_to_viewport()
 
     def _on_scroll(self, event: QtGui.QWheelEvent):
         _d = event.angleDelta().y()
         _scale_multiplier = 0.2
         self._scale(1 + ((_d / 120) * _scale_multiplier))
+
+    def gfxview_fill_space(self):
+        if self._gfxview is None:
+            raise Exception
+        self._gfxview.viewport().resize(self.parentWidget().size())
 
     def load_file(self, fileName):
         reader = QtGui.QImageReader(fileName)
@@ -155,7 +167,7 @@ class ImageViewer(QtWidgets.QWidget):
         gfxscene = QtWidgets.QGraphicsScene()
         self._pixmap_in_scene = gfxscene.addPixmap(QtGui.QPixmap.fromImage(self._image))
         self._gfxview.setScene(gfxscene)
-        self._fit_to_viewport()
+        self.fit_to_viewport()
 
     def _translate(self, x, y):
         if self._gfxview is None:
@@ -163,7 +175,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._gfxview.translate(x, y)
 
-    def _fit_to_viewport(self):
+    def fit_to_viewport(self):
         if self._gfxview is None:
             raise Exception
 
@@ -224,7 +236,7 @@ class ImageViewer(QtWidgets.QWidget):
             logging.debug(
                 "New dimensions would be smaller than viewport, fitting to viewport instead"
             )
-            self._fit_to_viewport()
+            self.fit_to_viewport()
             return
 
         self._img_scale = new_img_scale
