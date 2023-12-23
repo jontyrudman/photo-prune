@@ -25,14 +25,16 @@ class PhotoPrune(QtWidgets.QWidget):
         self.image_viewer.hide()
 
         # Fullscreen bindings
-        QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self.fullscreen)
+        QtGui.QShortcut(
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen
+        )
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
 
         self.landing.confirm_button.clicked.connect(self._switch_to_viewer)
         self.image_viewer.back_to_landing_sig.connect(self._switch_to_landing)
+        self.image_viewer.fullscreen_sig.connect(self._fullscreen)
 
-
-    def fullscreen(self):
+    def _fullscreen(self):
         if self.windowState() == QtCore.Qt.WindowState.WindowFullScreen:
             if self._last_window_state is not None:
                 self.setWindowState(self._last_window_state)

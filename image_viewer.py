@@ -22,6 +22,20 @@ class ImageViewer(QtWidgets.QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         self._img_scale = 1.0
+
+        self._set_up_gfxview()
+        if self._gfxview is None:
+            raise Exception
+
+        self.layout.addWidget(self._gfxview)
+
+        # Event callbacks
+        self.resizeEvent = self._on_resize
+        self.contextMenuEvent = self._on_context
+
+        self._set_up_shortcuts()
+
+    def _set_up_gfxview(self):
         self._gfxview = QtWidgets.QGraphicsView()
         self._gfxview.setBackgroundRole(QtGui.QPalette.ColorRole.Base)
         self._gfxview.setSizePolicy(
@@ -32,13 +46,9 @@ class ImageViewer(QtWidgets.QWidget):
             QtWidgets.QGraphicsView.ViewportAnchor.NoAnchor
         )
 
-        self._gfxview.setFrameStyle(QtWidgets.QFrame.Shape.Box)
-        self._gfxview.setLineWidth(20)
+        self._gfxview.setViewportMargins(20, 20, 20, 20)
 
         self._gfxview.wheelEvent = self._on_scroll
-        self.resizeEvent = self._on_resize
-        self.contextMenuEvent = self._on_context
-
         self._gfxview.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -46,8 +56,7 @@ class ImageViewer(QtWidgets.QWidget):
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
 
-        self.layout.addWidget(self._gfxview)
-
+    def _set_up_shortcuts(self):
         # Zoom bindings
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Equal),
@@ -90,16 +99,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self.menu.addAction("Prune another folder", self.back_to_landing_sig.emit)
         self.menu.addAction("Open discarded in file viewer")
-
-        if self.parentWidget().windowState() == QtCore.Qt.WindowState.WindowFullScreen:
-            self.fullscreen_action = self.menu.addAction(
-                "Exit fullscreen", self.parentWidget().fullscreen  # type: ignore
-            )
-        else:
-            self.fullscreen_action = self.menu.addAction(
-                "Fullscreen", self.parentWidget().fullscreen  # type: ignore
-            )
-
+        self.menu.addAction("Toggle fullscreen", self.fullscreen_sig.emit)
         self.menu.addAction("Help")
 
         self.menu.exec(event.globalPos())
@@ -122,7 +122,8 @@ class ImageViewer(QtWidgets.QWidget):
     def gfxview_fill_space(self):
         if self._gfxview is None:
             raise Exception
-        self._gfxview.viewport().resize(self.parentWidget().size())
+        self._gfxview.resize(self.parentWidget().size())
+        self._gfxview.viewport().resize(self._gfxview.maximumViewportSize())
 
     def load_file(self, fileName):
         reader = QtGui.QImageReader(fileName)
@@ -177,7 +178,8 @@ class ImageViewer(QtWidgets.QWidget):
 
     def fit_to_viewport(self):
         if self._gfxview is None:
-            raise Exception
+            logging.debug("No gfxview to fit a viewport to")
+            return
 
         self._fit_to_size(
             self._gfxview.viewport().width(),
