@@ -29,14 +29,18 @@ class Landing(QtWidgets.QWidget):
         self._show_comp_button.setChecked(True)
         self._show_raw_button = QtWidgets.QCheckBox("Prune raw images")
 
-        self.confirm_button = QtWidgets.QPushButton("Prune")
+        self._confirm_button = QtWidgets.QPushButton("Prune")
+        self._confirm_button.clicked.connect(self._on_confirm)
 
         self.layout.addLayout(self._dir_select_layout)
         self.layout.addWidget(self._show_comp_button)
         self.layout.addWidget(self._show_raw_button)
         self.layout.addWidget(
-            self.confirm_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
+            self._confirm_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
         )
+
+    def _on_confirm(self):
+        self.confirm_sig.emit(self._dir_line_edit.text())
 
     def _dir_select_dialog(self):
         dialog = QtWidgets.QFileDialog(self)

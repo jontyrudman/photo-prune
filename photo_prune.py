@@ -31,7 +31,7 @@ class PhotoPrune(QtWidgets.QWidget):
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen)
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
 
-        self.landing.confirm_button.clicked.connect(self._switch_to_viewer)
+        self.landing.confirm_sig.connect(self._switch_to_viewer)
         self.image_viewer.back_to_landing_sig.connect(self._switch_to_landing)
         self.image_viewer.fullscreen_sig.connect(self._fullscreen)
 
@@ -59,14 +59,15 @@ class PhotoPrune(QtWidgets.QWidget):
     def fix_size_to_min(self):
         self.setFixedSize(self.minimumSizeHint())
 
-    @QtCore.Slot()
-    def _switch_to_viewer(self):
+    @QtCore.Slot(str)
+    def _switch_to_viewer(self, folder: str):
         self.image_viewer.load_file("test-pic.jpg")
         self.unfix_size()
         self.resize(1280, 720)
         self.image_viewer.gfxview_fill_space()
         self.landing.hide()
         self.image_viewer.show()
+        print(folder)
         # TODO: Send a folder of photos
 
     @QtCore.Slot()
