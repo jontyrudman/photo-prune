@@ -1,3 +1,4 @@
+import os
 import logging
 from typing import Callable
 from PySide6 import QtWidgets, QtGui, QtCore
@@ -11,6 +12,10 @@ class ImageViewer(QtWidgets.QWidget):
     _gfxview: QtWidgets.QGraphicsView | None = None
     _pixmap_in_scene: QtWidgets.QGraphicsPixmapItem | None = None
     _last_window_state: QtCore.Qt.WindowState | None = None
+    _cwd: str | None = None
+    _ordered_files: list[str] = []
+    # Index and path of current file
+    _current_file: tuple[int, str] | None = None
 
     back_to_landing_sig = QtCore.Signal()
     fullscreen_sig = QtCore.Signal()
@@ -77,20 +82,18 @@ class ImageViewer(QtWidgets.QWidget):
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Right),
             self,
-            lambda: print("Next image"),
+            self._next_photo,
         )
         QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_Left), self, lambda: print("Prev image")
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_Left), self, self._prev_photo
         )
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Up), self, None)
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Down), self, None)
-        # TODO: Implement next and prev image funcs
 
         # Discard photo
         QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_D), self, lambda: print("Discard")
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_D), self, self._discard_current_photo
         )
-        # TODO: Implement discard func
 
     def _on_context(self, event: QtGui.QContextMenuEvent):
         self.menu = QtWidgets.QMenu(self)
@@ -126,7 +129,7 @@ class ImageViewer(QtWidgets.QWidget):
         self._gfxview.resize(self.parentWidget().size())
         self._gfxview.viewport().resize(self._gfxview.maximumViewportSize())
 
-    def load_file(self, fileName):
+    def load_file(self, fileName: str):
         reader = QtGui.QImageReader(fileName)
         reader.setAutoTransform(True)
         new_image = reader.read()
@@ -273,3 +276,91 @@ class ImageViewer(QtWidgets.QWidget):
         logging.debug(
             "PIXMAP size", self._pixmap_in_scene.pixmap().size()
         ) if self._pixmap_in_scene else None
+
+    def load_folder(self, folder: str):
+        """
+        Load the first photo by asc alphabetical filename in `folder`.
+        """
+        self._cwd = folder
+        # TODO: Make this a class attribute and changed by checkboxes on landing
+        accepted_exts = [".jpg", ".png", ".jpeg"]
+
+        # Build paths for self._ordered_files
+        paths = []
+        with os.scandir(folder) as scanner:
+            for f in scanner:
+                if f.is_file() and os.path.splitext(f)[1].lower() in accepted_exts:
+                    paths.append(f.path)
+
+        self._ordered_files = sorted(paths, key=str.lower)
+
+        self._current_file = 0, self._ordered_files[0]
+        self.load_file(self._ordered_files[0])
+
+    def _next_photo(self):
+        """
+        Move to whichever photo is evaluated by asc alphabetical filename as being next.
+        """
+        if self._current_file is None:
+            raise Exception
+
+        next_idx = self._current_file[0] + 1
+        if next_idx > len(self._ordered_files) - 1:
+            logging.info("No more photos to show")
+            return
+
+        self._current_file = next_idx, self._ordered_files[next_idx]
+        self.load_file(self._ordered_files[next_idx])
+
+    def _prev_photo(self):
+        """
+        Move to whichever photo is evaluated by asc alphabetical filename as being previous.
+        """
+        if self._current_file is None:
+            raise Exception
+
+        prev_idx = self._current_file[0] - 1
+        if prev_idx < 0:
+            logging.info("No more photos to show")
+            return
+
+        self._current_file = prev_idx, self._ordered_files[prev_idx]
+        self.load_file(self._ordered_files[prev_idx])
+
+    def _discard_current_photo(self):
+        """
+        Skip to next photo and discard skipped photo into "pruned" folder.
+        """
+        if self._current_file is None:
+            raise Exception
+
+        def _discard(_path: str):
+            """Move file to nested `pruned` folder"""
+            if self._cwd is None:
+                raise Exception
+
+            _dst = os.path.join(self._cwd, "pruned", os.path.basename(_path))
+            os.makedirs(os.path.join(self._cwd, "pruned"), exist_ok=True)
+            os.rename(_path, _dst)
+            logging.info(f"Moved {_path} to {_dst}")
+
+        discarded_file = self._current_file
+
+        # Remove from self._ordered_files
+        self._ordered_files.pop(self._current_file[0])
+
+        if self._current_file[0] < len(self._ordered_files):
+            # If there's something next
+            next_idx = self._current_file[0]
+        elif self._current_file[0] - 1 >= 0:
+            # Otherwise if there's something before
+            next_idx = self._current_file[0] - 1
+        else:
+            # TODO: If no photos left, display error dialog
+            _discard(discarded_file[1])
+            return
+
+        self._current_file = next_idx, self._ordered_files[next_idx]
+        self.load_file(self._ordered_files[next_idx])
+
+        _discard(discarded_file[1])

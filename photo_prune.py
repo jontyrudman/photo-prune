@@ -66,9 +66,8 @@ class PhotoPrune(QtWidgets.QWidget):
         self.resize(1280, 720)
         self.image_viewer.gfxview_fill_space()
         self.landing.hide()
+        self.image_viewer.load_folder(folder)
         self.image_viewer.show()
-        print(folder)
-        # TODO: Send a folder of photos
 
     @QtCore.Slot()
     def _switch_to_landing(self):
