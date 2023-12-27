@@ -5,6 +5,7 @@ venv
 *.nef
 *.cr2
 *.raf
+*.JPG
 *.JPEG
 *.PNG
 *.NEF
