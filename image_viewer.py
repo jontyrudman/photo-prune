@@ -171,6 +171,9 @@ class ImageViewer(QtWidgets.QWidget):
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Minus), self, lambda: self._scale(0.9)
         )
+        QtGui.QShortcut(
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_Underscore), self, lambda: self._scale(0.9)
+        )
 
         # We get Shift+Arrow translate for free
 
