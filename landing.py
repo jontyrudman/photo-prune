@@ -25,7 +25,7 @@ class Landing(QtWidgets.QWidget):
         self._dir_select_layout.addWidget(self._dir_line_edit)
         self._dir_select_layout.addWidget(self._dir_select_button)
 
-        self._show_comp_button = QtWidgets.QCheckBox("Prune compressed images")
+        self._show_comp_button = QtWidgets.QCheckBox("Prune standard images")
         self._show_comp_button.setChecked(True)
         self._show_raw_button = QtWidgets.QCheckBox("Prune raw images")
 
@@ -45,4 +45,5 @@ class Landing(QtWidgets.QWidget):
     def _dir_select_dialog(self):
         dialog = QtWidgets.QFileDialog(self)
         folder = dialog.getExistingDirectory()
-        self._dir_line_edit.setText(folder)
+        if folder:
+            self._dir_line_edit.setText(folder)

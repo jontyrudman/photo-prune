@@ -63,7 +63,14 @@ class PhotoPrune(QtWidgets.QWidget):
 
     @QtCore.Slot(str)
     def _switch_to_viewer(self, folder: str):
-        # self.image_viewer.load_file("test-pic.jpg")
+        if not os.path.isdir(folder):
+            logging.error("Not a valid folder")
+            msg_box = QtWidgets.QMessageBox()
+            msg_box.setText("Folder doesn't exist.")
+            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg_box.exec()
+            return
+
         self.unfix_size()
         self.resize(1280, 720)
         self.image_viewer.gfxview_fill_space()

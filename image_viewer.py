@@ -327,7 +327,12 @@ class ImageViewer(QtWidgets.QWidget):
                     paths.append(f.path)
 
         if not paths:
-            self._no_more_images()
+            logging.error("No photos in folder")
+            msg_box = QtWidgets.QMessageBox()
+            msg_box.setText("No photos in folder.")
+            msg_box.finished.connect(lambda: self.back_to_landing_sig.emit())
+            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg_box.exec()
             return
 
         self._ordered_files = sorted(paths, key=str.lower)
