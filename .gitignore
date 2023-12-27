@@ -1,7 +1,14 @@
 venv
 *.jpg
+*.jpeg
 *.png
 *.nef
 *.cr2
 *.raf
+*.JPEG
+*.PNG
+*.NEF
+*.CR2
+*.RAF
 __pycache__
+bin
