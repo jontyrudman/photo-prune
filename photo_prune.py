@@ -11,7 +11,7 @@ from stylesheet import stylesheet
 
 class PhotoPrune(QtWidgets.QWidget):
     layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
-    image_viewer: ImageViewer
+    image_viewer: ImageViewer | None = None
     landing: Landing
 
     def __init__(self, parent=None):
@@ -24,10 +24,7 @@ class PhotoPrune(QtWidgets.QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         self.landing = Landing()
-        self.image_viewer = ImageViewer()
         self.layout.addWidget(self.landing)
-        self.layout.addWidget(self.image_viewer)
-        self.image_viewer.hide()
 
         self.fix_size_to_min()
 
@@ -36,6 +33,14 @@ class PhotoPrune(QtWidgets.QWidget):
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
 
         self.landing.confirm_sig.connect(self._switch_to_viewer)
+
+        self._set_up_image_viewer()
+
+    def _set_up_image_viewer(self):
+        """Because we might tear it down"""
+        self.image_viewer = ImageViewer()
+        self.layout.addWidget(self.image_viewer)
+        self.image_viewer.hide()
         self.image_viewer.back_to_landing_sig.connect(self._switch_to_landing)
         self.image_viewer.fullscreen_sig.connect(self._fullscreen)
 
@@ -63,25 +68,35 @@ class PhotoPrune(QtWidgets.QWidget):
     def fix_size_to_min(self):
         self.setFixedSize(self.minimumSizeHint())
 
-    @QtCore.Slot(str)
-    def _switch_to_viewer(self, folder: str):
+    @QtCore.Slot(str, bool, bool)
+    def _switch_to_viewer(self, folder: str, include_std_img: bool, include_raw_img: bool):
+        def _err(m: str):
+            _msg_box = QtWidgets.QMessageBox()
+            _msg_box.setWindowTitle("Error")
+            _msg_box.setText(m)
+            _msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+            _msg_box.exec()
+            
         if not os.path.isdir(folder):
             logging.error("Not a valid folder")
-            msg_box = QtWidgets.QMessageBox()
-            msg_box.setWindowTitle("Error")
-            msg_box.setText("Folder doesn't exist.")
-            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
-            msg_box.exec()
+            _err("Folder doesn't exist.")
             return
+
+        self._set_up_image_viewer()
+        if self.image_viewer is None:
+            raise Exception
+
+        if not include_std_img and not include_raw_img:
+            _err("You must check one of the image format boxes.")
+            return
+
+        self.image_viewer.include_standard_images(include_std_img)
+        self.image_viewer.include_raw_images(include_raw_img)
 
         try:
             self.image_viewer.load_folder(folder)
         except Exception as e:
-            msg_box = QtWidgets.QMessageBox()
-            msg_box.setWindowTitle("Error")
-            msg_box.setText(str(e))
-            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
-            msg_box.exec()
+            _err(str(e))
             return
 
         self.unfix_size()
@@ -94,7 +109,8 @@ class PhotoPrune(QtWidgets.QWidget):
     def _switch_to_landing(self):
         # TODO: Img cleanup/viewer destruction
         self.fix_size_to_min()
-        self.image_viewer.hide()
+        if self.image_viewer:
+            self.image_viewer.hide()
         self.landing.show()
 
 

@@ -9,6 +9,11 @@ from PySide6 import QtWidgets, QtGui, QtCore
 # Viewport margins left, top, right, bottom
 PHOTO_MARGINS = [20, 20, 20, 20]
 
+ACCEPTED_FILE_EXTENSIONS = {
+    "standard": [".jpg", ".png", ".jpeg"],
+    "raw": [".nef", ".raf", ".cr2", ".tiff"],  # For now
+}
+
 
 class NoMoreImages(QtWidgets.QWidget):
     layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
@@ -87,6 +92,8 @@ class ImageViewer(QtWidgets.QWidget):
     _ordered_files: list[str] = []
     # Index and path of current file
     _current_file: tuple[int, str] | None = None
+    _include_standard_image_ext: bool = True
+    _include_raw_image_ext: bool = False
 
     _no_images_layout: NoMoreImages | None = None
     _overlay: Overlay | None = None
@@ -215,6 +222,15 @@ class ImageViewer(QtWidgets.QWidget):
         self._gfxview.viewport().resize(self._gfxview.maximumViewportSize())
 
     def load_file(self, fileName: str):
+        if self._gfxview:
+            self._gfxview.show()
+        if self._pixmap_in_scene:
+            self._pixmap_in_scene.show()
+        if self._overlay:
+            self._overlay.show()
+        if self._no_images_layout:
+            self._no_images_layout.hide()
+
         reader = QtGui.QImageReader(fileName)
         reader.setAutoTransform(True)
         new_image = reader.read()
@@ -392,14 +408,22 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._cwd_file_count = count
 
-        # TODO: Make this a class attribute and changed by checkboxes on landing
-        accepted_exts = [".jpg", ".png", ".jpeg"]
+        accepted_exts = (
+            ACCEPTED_FILE_EXTENSIONS["standard"]
+            if self._include_standard_image_ext
+            else []
+        ) + (ACCEPTED_FILE_EXTENSIONS["raw"] if self._include_raw_image_ext else [])
+        logging.debug(f"Accepted file extensions: {accepted_exts}")
 
         # Build paths for self._ordered_files
         paths = []
         with os.scandir(self._cwd) as scanner:
             for f in scanner:
-                if f.is_file() and os.path.splitext(f)[1].lower() in accepted_exts:
+                if (
+                    f.is_file()
+                    and os.path.splitext(f)[1].lower()
+                    in accepted_exts
+                ):
                     paths.append(f.path)
 
         self._ordered_files = sorted(paths, key=str.lower)
@@ -408,6 +432,7 @@ class ImageViewer(QtWidgets.QWidget):
         """
         Load the first photo by asc alphabetical filename in `folder`.
         """
+        logging.info(f"Loading {folder}...")
         self._cwd = folder
         self._scan_cwd()
 
@@ -520,3 +545,11 @@ class ImageViewer(QtWidgets.QWidget):
             subprocess.Popen(["open", pruned_path])
         else:
             subprocess.Popen(["xdg-open", pruned_path])
+
+    def include_raw_images(self, include: bool):
+        self._include_raw_image_ext = include
+        logging.info(f"{'In' if include else 'Ex'}cluding raw images")
+
+    def include_standard_images(self, include: bool):
+        self._include_standard_image_ext = include
+        logging.info(f"{'In' if include else 'Ex'}cluding standard images")

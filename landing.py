@@ -1,12 +1,13 @@
-import logging
 from typing import Callable
-from PySide6 import QtWidgets, QtGui, QtCore
+from PySide6 import QtWidgets, QtCore
 
 
 class Landing(QtWidgets.QWidget):
     layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
     placeholder = None
-    confirm_sig = QtCore.Signal(str)
+    confirm_sig = QtCore.Signal(
+        str, bool, bool, arguments=["folder", "include_std_img", "include_raw_img"]
+    )
 
     def __init__(self, parent=None):
         super(Landing, self).__init__(parent)
@@ -25,22 +26,27 @@ class Landing(QtWidgets.QWidget):
         self._dir_select_layout.addWidget(self._dir_line_edit)
         self._dir_select_layout.addWidget(self._dir_select_button)
 
-        self._show_comp_button = QtWidgets.QCheckBox("Prune standard images")
-        self._show_comp_button.setChecked(True)
+        self._show_std_button = QtWidgets.QCheckBox("Prune standard images")
+        self._show_std_button.setChecked(True)
         self._show_raw_button = QtWidgets.QCheckBox("Prune raw images")
+        self._show_raw_button.setDisabled(True)  # TODO: Enable when raw supported
 
         self._confirm_button = QtWidgets.QPushButton("Prune")
         self._confirm_button.clicked.connect(self._on_confirm)
 
         self.layout.addLayout(self._dir_select_layout)
-        self.layout.addWidget(self._show_comp_button)
+        self.layout.addWidget(self._show_std_button)
         self.layout.addWidget(self._show_raw_button)
         self.layout.addWidget(
             self._confirm_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
         )
 
     def _on_confirm(self):
-        self.confirm_sig.emit(self._dir_line_edit.text())
+        self.confirm_sig.emit(
+            self._dir_line_edit.text(),
+            self._show_std_button.isChecked(),
+            self._show_raw_button.isChecked(),
+        )
 
     def _dir_select_dialog(self):
         dialog = QtWidgets.QFileDialog(self)
