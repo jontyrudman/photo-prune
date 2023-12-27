@@ -1,8 +1,9 @@
+import sys
 import logging
 import os
-import sys
 from typing import Callable
 from PySide6 import QtCore, QtWidgets, QtGui
+from async_helper import thread
 
 from image_viewer import ImageViewer
 from landing import Landing
@@ -29,7 +30,9 @@ class PhotoPrune(QtWidgets.QWidget):
         self.fix_size_to_min()
 
         # Fullscreen bindings
-        QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen)
+        QtGui.QShortcut(
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_F11), self, self._fullscreen
+        )
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
 
         self.landing.confirm_sig.connect(self._switch_to_viewer)
@@ -69,14 +72,16 @@ class PhotoPrune(QtWidgets.QWidget):
         self.setFixedSize(self.minimumSizeHint())
 
     @QtCore.Slot(str, bool, bool)
-    def _switch_to_viewer(self, folder: str, include_std_img: bool, include_raw_img: bool):
+    def _switch_to_viewer(
+        self, folder: str, include_std_img: bool, include_raw_img: bool
+    ):
         def _err(m: str):
             _msg_box = QtWidgets.QMessageBox()
             _msg_box.setWindowTitle("Error")
             _msg_box.setText(m)
             _msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
             _msg_box.exec()
-            
+
         if not os.path.isdir(folder):
             logging.error("Not a valid folder")
             _err("Folder doesn't exist.")
@@ -138,5 +143,8 @@ if __name__ == "__main__":
 
     photo_prune = PhotoPrune()
     photo_prune.show()
-
-    sys.exit(app.exec())
+    
+    thread.start_async()
+    exit_code = app.exec()
+    thread.stop_async()
+    sys.exit(exit_code)
