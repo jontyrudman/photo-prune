@@ -22,7 +22,6 @@ jobs:
           source venv/bin/activate
           pyside6-deploy -c pysidedeploy.spec
       - name: Upload executable
-        uses: actions/upload-artifact@v3
         run:
           gh release upload ${{$GITHUB_REF}} bin/photo-prune       
         env:
