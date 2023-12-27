@@ -26,9 +26,9 @@ jobs:
         run: |
           source venv/bin/activate
           pyside6-deploy -c pysidedeploy_linux.spec
-          chmod +x bin/photo-prune_linux
+          chmod +x bin/photo-prune_linux.bin
       - name: Upload executable
         run:
-          gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_linux
+          gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_linux.bin
         env:
           GITHUB_TOKEN: ${{ github.TOKEN }}

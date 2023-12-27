@@ -28,6 +28,6 @@ jobs:
           pyside6-deploy -c pysidedeploy_macos.spec
       - name: Upload executable
         run:
-          gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_macos.app
+          gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_macos.bin
         env:
           GITHUB_TOKEN: ${{ github.TOKEN }}
