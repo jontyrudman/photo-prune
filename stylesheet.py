@@ -24,4 +24,8 @@ ImageViewer QMenu::item::selected {
 ImageViewer QMenu::separator {
     height: 15px;
 }
+
+ImageViewer NoMoreImages QLabel {
+    color: black;
+}
 """

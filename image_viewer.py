@@ -4,6 +4,31 @@ from typing import Callable
 from PySide6 import QtWidgets, QtGui, QtCore
 
 
+class NoMoreImages(QtWidgets.QWidget):
+    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
+
+    _text: QtWidgets.QLabel | None = None
+    _landing_button: QtWidgets.QPushButton | None = None
+
+    landing_button_sig = QtCore.Signal()
+
+    def __init__(self, parent=None):
+        super(NoMoreImages, self).__init__(parent)
+
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+
+        self._text = QtWidgets.QLabel()
+        self._text.setText("No images to display.")
+
+        self._landing_button = QtWidgets.QPushButton()
+        self._landing_button.setText("Return")
+        self._landing_button.clicked.connect(self.landing_button_sig.emit)
+
+        self.layout.addWidget(self._text)
+        self.layout.addWidget(self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+
+
 class ImageViewer(QtWidgets.QWidget):
     layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
 
@@ -16,6 +41,8 @@ class ImageViewer(QtWidgets.QWidget):
     _ordered_files: list[str] = []
     # Index and path of current file
     _current_file: tuple[int, str] | None = None
+
+    _no_images_layout: NoMoreImages | None = None
 
     back_to_landing_sig = QtCore.Signal()
     fullscreen_sig = QtCore.Signal()
@@ -39,7 +66,13 @@ class ImageViewer(QtWidgets.QWidget):
         self.contextMenuEvent = self._on_context
 
         self._set_up_shortcuts()
+        self._set_up_no_images_layout()
 
+    def _set_up_no_images_layout(self):
+        self._no_images_layout = NoMoreImages(self)
+        self._no_images_layout.hide()
+        self._no_images_layout.resize(self.size())
+        self._no_images_layout.landing_button_sig.connect(self.back_to_landing_sig.emit)
 
     def _set_up_gfxview(self):
         self._gfxview = QtWidgets.QGraphicsView()
@@ -109,14 +142,15 @@ class ImageViewer(QtWidgets.QWidget):
         self.menu.exec(event.globalPos())
 
     def _on_resize(self, event: QtGui.QResizeEvent):
-        if self._gfxview is None or self._gfxview.scene() is None:
-            return
+        if self._no_images_layout is not None:
+            self._no_images_layout.resize(self.size())
 
-        if (
-            self._gfxview.scene().width() < self._gfxview.viewport().width()
-            or self._gfxview.scene().height() < self._gfxview.viewport().height()
-        ):
-            self.fit_to_viewport()
+        if self._gfxview is not None and self._gfxview.scene() is not None:
+            if (
+                self._gfxview.scene().width() < self._gfxview.viewport().width()
+                or self._gfxview.scene().height() < self._gfxview.viewport().height()
+            ):
+                self.fit_to_viewport()
 
     def _on_scroll(self, event: QtGui.QWheelEvent):
         _d = event.angleDelta().y()
@@ -292,6 +326,10 @@ class ImageViewer(QtWidgets.QWidget):
                 if f.is_file() and os.path.splitext(f)[1].lower() in accepted_exts:
                     paths.append(f.path)
 
+        if not paths:
+            self._no_more_images()
+            return
+
         self._ordered_files = sorted(paths, key=str.lower)
 
         self._current_file = 0, self._ordered_files[0]
@@ -356,11 +394,19 @@ class ImageViewer(QtWidgets.QWidget):
             # Otherwise if there's something before
             next_idx = self._current_file[0] - 1
         else:
-            # TODO: If no photos left, display error dialog
+            logging.info("No images left to prune")
             _discard(discarded_file[1])
+            self._no_more_images()
             return
 
         self._current_file = next_idx, self._ordered_files[next_idx]
         self.load_file(self._ordered_files[next_idx])
 
         _discard(discarded_file[1])
+
+    def _no_more_images(self):
+        if self._pixmap_in_scene is not None:
+            self._pixmap_in_scene.hide()
+
+        if self._no_images_layout is not None:
+            self._no_images_layout.show()

@@ -63,7 +63,7 @@ class PhotoPrune(QtWidgets.QWidget):
 
     @QtCore.Slot(str)
     def _switch_to_viewer(self, folder: str):
-        self.image_viewer.load_file("test-pic.jpg")
+        # self.image_viewer.load_file("test-pic.jpg")
         self.unfix_size()
         self.resize(1280, 720)
         self.image_viewer.gfxview_fill_space()
