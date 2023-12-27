@@ -1,4 +1,4 @@
-name: Build Executable (Linux)
+name: Build Executable (Windows)
 
 on:
   release:
@@ -10,7 +10,7 @@ permissions:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -24,11 +24,10 @@ jobs:
           pip install -r requirements.txt
       - name: Build package
         run: |
-          source venv/bin/activate
-          pyside6-deploy -c pysidedeploy_linux.spec
-          chmod +x bin/photo-prune_linux
+          venv\Scripts\Activate.ps1
+          pyside6-deploy -c pysidedeploy_windows.spec
       - name: Upload executable
         run:
-          gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_linux
+          gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_windows.exe
         env:
           GITHUB_TOKEN: ${{ github.TOKEN }}

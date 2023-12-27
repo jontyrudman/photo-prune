@@ -13,7 +13,7 @@ project_file = .pyproject
 
 [python]
 # python path
-python_path = /home/jonty/photo-prune/venv/bin/python
+python_path = ./venv/bin/python
 # python packages to install
 # ordered-set = increase compile time performance of nuitka packaging
 # zstandard = provides final executable size optimization
@@ -32,12 +32,12 @@ wheel_pyside =
 # path to shiboken wheel
 wheel_shiboken = 
 # plugins to be copied to libs folder of the packaged application. comma separated
-plugins = platforms_qtforandroid
+plugins =
 
 [nuitka]
 # (str) specify any extra nuitka arguments
 # eg = extra_args = --show-modules --follow-stdlib
-extra_args = --quiet --noinclude-qt-translations=True --output-dir=bin --output-filename=photo-prune
+extra_args = --quiet --noinclude-qt-translations=True --output-dir=bin --output-filename=photo-prune_windows.exe
 
 [buildozer]
 # build mode
