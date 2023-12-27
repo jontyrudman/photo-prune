@@ -1,7 +1,13 @@
 import os
 import logging
+import platform
+import subprocess
 from typing import Callable
 from PySide6 import QtWidgets, QtGui, QtCore
+
+
+# Viewport margins left, top, right, bottom
+PHOTO_MARGINS = [20, 20, 20, 20]
 
 
 class NoMoreImages(QtWidgets.QWidget):
@@ -26,7 +32,45 @@ class NoMoreImages(QtWidgets.QWidget):
         self._landing_button.clicked.connect(self.landing_button_sig.emit)
 
         self.layout.addWidget(self._text)
-        self.layout.addWidget(self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(
+            self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
+        )
+
+
+class Overlay(QtWidgets.QWidget):
+    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
+
+    _filename_label: QtWidgets.QLabel | None = None
+    _position_label: QtWidgets.QLabel | None = None
+
+    def __init__(self, parent=None):
+        super(Overlay, self).__init__(parent)
+
+        self.layout = QtWidgets.QHBoxLayout(self)
+        self.layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignBottom)
+        self.layout.setContentsMargins(5, 2, 5, 2)
+        self.layout.setSpacing(0)
+
+        self._filename_label = QtWidgets.QLabel()
+        self._position_label = QtWidgets.QLabel()
+
+        self.layout.addWidget(self._filename_label)
+        self.layout.addWidget(
+            self._position_label, alignment=QtCore.Qt.AlignmentFlag.AlignRight
+        )
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    def set_filename(self, filename: str | None):
+        if self._filename_label is None:
+            raise Exception
+
+        self._filename_label.setText(filename or "")
+
+    def set_position(self, pos: int = 1, total: int = 1):
+        if self._position_label is None:
+            raise Exception
+
+        self._position_label.setText(f"{pos}/{total}")
 
 
 class ImageViewer(QtWidgets.QWidget):
@@ -37,12 +81,15 @@ class ImageViewer(QtWidgets.QWidget):
     _gfxview: QtWidgets.QGraphicsView | None = None
     _pixmap_in_scene: QtWidgets.QGraphicsPixmapItem | None = None
     _last_window_state: QtCore.Qt.WindowState | None = None
+
     _cwd: str | None = None
+    _cwd_file_count: int = 0
     _ordered_files: list[str] = []
     # Index and path of current file
     _current_file: tuple[int, str] | None = None
 
     _no_images_layout: NoMoreImages | None = None
+    _overlay: Overlay | None = None
 
     back_to_landing_sig = QtCore.Signal()
     fullscreen_sig = QtCore.Signal()
@@ -67,6 +114,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._set_up_shortcuts()
         self._set_up_no_images_layout()
+        self._overlay = Overlay(self)
 
     def _set_up_no_images_layout(self):
         self._no_images_layout = NoMoreImages(self)
@@ -85,7 +133,7 @@ class ImageViewer(QtWidgets.QWidget):
             QtWidgets.QGraphicsView.ViewportAnchor.NoAnchor
         )
 
-        self._gfxview.setViewportMargins(20, 20, 20, 20)
+        self._gfxview.setViewportMargins(*PHOTO_MARGINS)
 
         self._gfxview.wheelEvent = self._on_scroll
         self._gfxview.setHorizontalScrollBarPolicy(
@@ -131,19 +179,22 @@ class ImageViewer(QtWidgets.QWidget):
     def _on_context(self, event: QtGui.QContextMenuEvent):
         self.menu = QtWidgets.QMenu(self)
 
-        self.menu.addAction("Discard this image")
+        self.menu.addAction("Discard this image", self._discard_current_photo)
         self.menu.addSeparator()
 
         self.menu.addAction("Prune another folder", self.back_to_landing_sig.emit)
-        self.menu.addAction("Open discarded in file viewer")
+        self.menu.addAction("Open discard folder in file viewer", self._open_discarded)
         self.menu.addAction("Toggle fullscreen", self.fullscreen_sig.emit)
-        self.menu.addAction("Help")
+        self.menu.addAction("Help")  # TODO
 
         self.menu.exec(event.globalPos())
 
     def _on_resize(self, event: QtGui.QResizeEvent):
         if self._no_images_layout is not None:
             self._no_images_layout.resize(self.size())
+
+        if self._overlay is not None:
+            self._overlay.resize(self.size())
 
         if self._gfxview is not None and self._gfxview.scene() is not None:
             if (
@@ -175,7 +226,7 @@ class ImageViewer(QtWidgets.QWidget):
                 QtGui.QGuiApplication.applicationDisplayName(),
                 f"Cannot load {native_filename}: {error}",
             )
-            return False
+            return
         self._set_image(new_image)
         self.setWindowFilePath(fileName)
 
@@ -189,7 +240,13 @@ class ImageViewer(QtWidgets.QWidget):
         description = color_space.description() if color_space.isValid() else "unknown"
         message = f'Opened "{native_filename}", {w}x{h}, Depth: {d} ({description})'
         logging.info(message)
-        return True
+
+        if self._overlay:
+            self._overlay.set_filename(os.path.basename(native_filename))
+            if self._current_file:
+                self._overlay.set_position(
+                    self._current_file[0] + 1, len(self._ordered_files)
+                )
 
     def _set_image(self, new_image):
         if self._gfxview is None:
@@ -303,7 +360,9 @@ class ImageViewer(QtWidgets.QWidget):
         self._log_view_sizes()
 
     def _log_view_sizes(self):
-        logging.debug(f"GFXVIEW size {str(self._gfxview.size())}") if self._gfxview else None
+        logging.debug(
+            f"GFXVIEW size {str(self._gfxview.size())}"
+        ) if self._gfxview else None
         logging.debug(
             f"SCENE size {str(self._gfxview.scene().sceneRect())}"
         ) if self._gfxview else None
@@ -311,31 +370,50 @@ class ImageViewer(QtWidgets.QWidget):
             f"PIXMAP size {str(self._pixmap_in_scene.pixmap().size())}"
         ) if self._pixmap_in_scene else None
 
-    def load_folder(self, folder: str):
+    def _scan_cwd(self):
         """
-        Load the first photo by asc alphabetical filename in `folder`.
+        Build the `self._ordered_files` list of accepted file paths in `self._cwd`.
+        Skips if file count hasn't changed.
         """
-        self._cwd = folder
+        if self._cwd is None:
+            raise Exception
+
+        # Check cached file count and if it's not changed, return early
+        count = len(
+            [
+                name
+                for name in os.listdir(self._cwd)
+                if os.path.isfile(os.path.join(self._cwd, name))
+            ]
+        )
+        if count == self._cwd_file_count:
+            logging.debug(f"File count hasn't changed ({count}); skipping scan")
+            return
+
+        self._cwd_file_count = count
+
         # TODO: Make this a class attribute and changed by checkboxes on landing
         accepted_exts = [".jpg", ".png", ".jpeg"]
 
         # Build paths for self._ordered_files
         paths = []
-        with os.scandir(folder) as scanner:
+        with os.scandir(self._cwd) as scanner:
             for f in scanner:
                 if f.is_file() and os.path.splitext(f)[1].lower() in accepted_exts:
                     paths.append(f.path)
 
-        if not paths:
-            logging.error("No photos in folder")
-            msg_box = QtWidgets.QMessageBox()
-            msg_box.setText("No photos in folder.")
-            msg_box.finished.connect(lambda: self.back_to_landing_sig.emit())
-            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
-            msg_box.exec()
-            return
-
         self._ordered_files = sorted(paths, key=str.lower)
+
+    def load_folder(self, folder: str):
+        """
+        Load the first photo by asc alphabetical filename in `folder`.
+        """
+        self._cwd = folder
+        self._scan_cwd()
+
+        if not self._ordered_files:
+            logging.error("No photos in folder")
+            raise Exception("No photos in folder.")
 
         self._current_file = 0, self._ordered_files[0]
         self.load_file(self._ordered_files[0])
@@ -346,6 +424,8 @@ class ImageViewer(QtWidgets.QWidget):
         """
         if self._current_file is None:
             raise Exception
+
+        self._scan_cwd()
 
         next_idx = self._current_file[0] + 1
         if next_idx > len(self._ordered_files) - 1:
@@ -361,6 +441,8 @@ class ImageViewer(QtWidgets.QWidget):
         """
         if self._current_file is None:
             raise Exception
+
+        self._scan_cwd()
 
         prev_idx = self._current_file[0] - 1
         if prev_idx < 0:
@@ -382,8 +464,9 @@ class ImageViewer(QtWidgets.QWidget):
             if self._cwd is None:
                 raise Exception
 
-            _dst = os.path.join(self._cwd, "pruned", os.path.basename(_path))
-            os.makedirs(os.path.join(self._cwd, "pruned"), exist_ok=True)
+            _pruned_folder_path = self._get_pruned_folder_path()
+            _dst = os.path.join(_pruned_folder_path, os.path.basename(_path))
+            os.makedirs(_pruned_folder_path, exist_ok=True)
             os.rename(_path, _dst)
             logging.info(f"Moved {_path} to {_dst}")
 
@@ -391,6 +474,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         # Remove from self._ordered_files
         self._ordered_files.pop(self._current_file[0])
+        self._cwd_file_count -= 1
 
         if self._current_file[0] < len(self._ordered_files):
             # If there's something next
@@ -408,10 +492,31 @@ class ImageViewer(QtWidgets.QWidget):
         self.load_file(self._ordered_files[next_idx])
 
         _discard(discarded_file[1])
+        self._scan_cwd()
 
     def _no_more_images(self):
+        if self._overlay is not None:
+            self._overlay.hide()
+
         if self._pixmap_in_scene is not None:
             self._pixmap_in_scene.hide()
 
         if self._no_images_layout is not None:
             self._no_images_layout.show()
+
+    def _get_pruned_folder_path(self):
+        if self._cwd is None:
+            raise Exception
+
+        return os.path.join(self._cwd, "pruned")
+
+    def _open_discarded(self):
+        """Open 'pruned' folder in file viewer."""
+        pruned_path = self._get_pruned_folder_path()
+        os.makedirs(pruned_path, exist_ok=True)
+        if platform.system() == "Windows":
+            os.startfile(pruned_path)
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", pruned_path])
+        else:
+            subprocess.Popen(["xdg-open", pruned_path])

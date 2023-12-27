@@ -28,4 +28,9 @@ ImageViewer QMenu::separator {
 ImageViewer NoMoreImages QLabel {
     color: black;
 }
+
+ImageViewer Overlay QLabel {
+    color: grey;
+    font-weight: bold;
+}
 """

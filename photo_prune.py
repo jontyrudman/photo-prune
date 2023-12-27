@@ -18,6 +18,8 @@ class PhotoPrune(QtWidgets.QWidget):
         super(PhotoPrune, self).__init__(parent)
 
         self.setStyleSheet(stylesheet)
+        self.setWindowTitle("Photo Prune")
+
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
@@ -66,7 +68,18 @@ class PhotoPrune(QtWidgets.QWidget):
         if not os.path.isdir(folder):
             logging.error("Not a valid folder")
             msg_box = QtWidgets.QMessageBox()
+            msg_box.setWindowTitle("Error")
             msg_box.setText("Folder doesn't exist.")
+            msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+            msg_box.exec()
+            return
+
+        try:
+            self.image_viewer.load_folder(folder)
+        except Exception as e:
+            msg_box = QtWidgets.QMessageBox()
+            msg_box.setWindowTitle("Error")
+            msg_box.setText(str(e))
             msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
             msg_box.exec()
             return
@@ -75,7 +88,6 @@ class PhotoPrune(QtWidgets.QWidget):
         self.resize(1280, 720)
         self.image_viewer.gfxview_fill_space()
         self.landing.hide()
-        self.image_viewer.load_folder(folder)
         self.image_viewer.show()
 
     @QtCore.Slot()
