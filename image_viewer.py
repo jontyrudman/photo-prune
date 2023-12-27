@@ -200,8 +200,8 @@ class ImageViewer(QtWidgets.QWidget):
         self.menu.addAction("Discard this image", self._discard_current_photo)
         self.menu.addSeparator()
 
-        self.menu.addAction("Prune another folder", self.back_to_landing_sig.emit)
         self.menu.addAction("Open discard folder in file viewer", self._open_discarded)
+        self.menu.addAction("Prune another folder", self.back_to_landing_sig.emit)
         self.menu.addAction("Toggle fullscreen", self.fullscreen_sig.emit)
         self.menu.addAction("Help")  # TODO
 
