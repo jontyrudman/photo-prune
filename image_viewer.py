@@ -269,12 +269,12 @@ class ImageViewer(QtWidgets.QWidget):
         self._log_view_sizes()
 
     def _log_view_sizes(self):
-        logging.debug("GFXVIEW size", self._gfxview.size()) if self._gfxview else None
+        logging.debug(f"GFXVIEW size {str(self._gfxview.size())}") if self._gfxview else None
         logging.debug(
-            "SCENE size", self._gfxview.scene().sceneRect()
+            f"SCENE size {str(self._gfxview.scene().sceneRect())}"
         ) if self._gfxview else None
         logging.debug(
-            "PIXMAP size", self._pixmap_in_scene.pixmap().size()
+            f"PIXMAP size {str(self._pixmap_in_scene.pixmap().size())}"
         ) if self._pixmap_in_scene else None
 
     def load_folder(self, folder: str):

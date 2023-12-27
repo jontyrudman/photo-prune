@@ -1,3 +1,5 @@
+import logging
+import os
 import sys
 from typing import Callable
 from PySide6 import QtCore, QtWidgets, QtGui
@@ -77,7 +79,26 @@ class PhotoPrune(QtWidgets.QWidget):
         self.landing.show()
 
 
+def set_up_logging():
+    log_level_name = os.getenv("LOG_LEVEL")
+    levels = {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+        "CRITICAL": logging.CRITICAL,
+    }
+
+    log_level = logging.WARNING
+    if log_level_name is not None and log_level_name in levels.keys():
+        log_level = levels[log_level_name]
+
+    logging.basicConfig(level=log_level)
+    logging.info(f"Log level set to {logging.getLevelName(log_level)}")
+
+
 if __name__ == "__main__":
+    set_up_logging()
     app = QtWidgets.QApplication([])
 
     photo_prune = PhotoPrune()
