@@ -23,6 +23,6 @@ jobs:
           pyside6-deploy -c pysidedeploy.spec
       - name: Upload executable
         run:
-          gh release upload ${{$GITHUB_REF}} bin/photo-prune       
+          gh release upload $GITHUB_REF bin/photo-prune       
         env:
           GITHUB_TOKEN: ${{ github.TOKEN }}
