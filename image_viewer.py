@@ -82,7 +82,7 @@ class Overlay(QtWidgets.QWidget):
         self._position_label.setText(f"{pos}/{total}")
 
 
-class ReplaceableWaiter():
+class ReplaceableWaiter:
     _waiting_thread: QtCore.QThread | None = None
     _running_thread: QtCore.QThread | None = None
 
@@ -130,7 +130,7 @@ class LoadFileThread(QtCore.QThread):
 
 
 class PreloadFilesThread(QtCore.QThread):
-    def __init__(self, preload_coros: list=[], parent=None):
+    def __init__(self, preload_coros: list = [], parent=None):
         super().__init__(parent)
 
         def run():
@@ -229,7 +229,9 @@ class ImageViewer(QtWidgets.QWidget):
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Minus), self, lambda: self._scale(0.9)
         )
         QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_Underscore), self, lambda: self._scale(0.9)
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_Underscore),
+            self,
+            lambda: self._scale(0.9),
         )
 
         # We get Shift+Arrow translate for free
@@ -332,7 +334,9 @@ class ImageViewer(QtWidgets.QWidget):
             h = self._image.height()
             d = self._image.depth()
             color_space = self._image.colorSpace()
-            description = color_space.description() if color_space.isValid() else "unknown"
+            description = (
+                color_space.description() if color_space.isValid() else "unknown"
+            )
             message = f'Read "{fileName}", {w}x{h}, Depth: {d} ({description})'
             logging.info(message)
 
@@ -340,10 +344,9 @@ class ImageViewer(QtWidgets.QWidget):
             lambda: self._read_image(fileName),
             parent=self,
         )
-    
+
         t.result_ready.connect(callback)
         self._load_image_thread_replaceable_waiter.submit_thread(t)
-
 
     @functools.lru_cache(maxsize=IMAGE_PRELOAD_MAX)
     def _read_image(self, fpath: str):
@@ -536,7 +539,7 @@ class ImageViewer(QtWidgets.QWidget):
             self.get_preload_coros(),
             parent=self,
         )
-    
+
         self._preload_images_thread_replaceable_waiter.submit_thread(t)
         return
 
@@ -576,7 +579,6 @@ class ImageViewer(QtWidgets.QWidget):
         logging.debug(f"Preload window: {window_start}, {window_end}")
 
         return preload_coros
-            
 
     def load_folder(self, folder: str):
         """
