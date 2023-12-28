@@ -7,8 +7,6 @@ import subprocess
 from typing import Callable
 from PySide6 import QtWidgets, QtGui, QtCore
 
-from async_helper import thread
-
 
 # Viewport margins left, top, right, bottom
 PHOTO_MARGINS = [20, 20, 20, 20]
@@ -84,6 +82,64 @@ class Overlay(QtWidgets.QWidget):
         self._position_label.setText(f"{pos}/{total}")
 
 
+class ReplaceableWaiter():
+    _waiting_thread: QtCore.QThread | None = None
+    _running_thread: QtCore.QThread | None = None
+
+    def submit_thread(self, t: QtCore.QThread):
+        t.finished.connect(self._thread_finished)
+
+        # If there's a thread running, insert a waiting thread
+        if self._running_thread:
+            logging.debug("Replacing waiting QThread")
+            self._waiting_thread = t
+
+        # Otherwise if there's no thread running, insert a running thread
+        else:
+            logging.debug("Inserting running QThread")
+            self._running_thread = t
+            self._running_thread.start()
+
+    def _thread_finished(self):
+        if self._running_thread is None:
+            return
+
+        self._running_thread.deleteLater()
+        logging.debug("Deleting finished QThread")
+        self._running_thread = None
+
+        # If there's a thread waiting, swap it out now we've run
+        if self._waiting_thread:
+            logging.debug("Replacing finished QThread")
+            self._running_thread = self._waiting_thread
+            self._waiting_thread = None
+            self._running_thread.start()
+
+
+class LoadFileThread(QtCore.QThread):
+    result_ready = QtCore.Signal(QtGui.QImage)
+
+    def __init__(self, read_fn, parent=None):
+        super().__init__(parent)
+
+        def run():
+            res = read_fn()
+            self.result_ready.emit(res)
+
+        self.run = run
+
+
+class PreloadFilesThread(QtCore.QThread):
+    def __init__(self, preload_coros: list=[], parent=None):
+        super().__init__(parent)
+
+        def run():
+            for c in preload_coros:
+                asyncio.run(c)
+
+        self.run = run
+
+
 class ImageViewer(QtWidgets.QWidget):
     layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
 
@@ -104,7 +160,8 @@ class ImageViewer(QtWidgets.QWidget):
     _no_images_layout: NoMoreImages | None = None
     _overlay: Overlay | None = None
 
-    _thread: QtCore.QThread
+    _load_image_thread_replaceable_waiter = ReplaceableWaiter()
+    _preload_images_thread_replaceable_waiter = ReplaceableWaiter()
 
     back_to_landing_sig = QtCore.Signal()
     fullscreen_sig = QtCore.Signal()
@@ -122,7 +179,6 @@ class ImageViewer(QtWidgets.QWidget):
             raise Exception
 
         self.layout.addWidget(self._gfxview)
-        self._thread = QtCore.QThread(self)
 
         # Event callbacks
         self.resizeEvent = self._on_resize
@@ -233,22 +289,6 @@ class ImageViewer(QtWidgets.QWidget):
         self._gfxview.resize(self.parentWidget().size())
         self._gfxview.viewport().resize(self._gfxview.maximumViewportSize())
 
-    class LoadFileThread(QtCore.QThread):
-        result_ready = QtCore.Signal(QtGui.QImage)
-
-        def __init__(self, read_fn, preload_coros: list=[], parent=None):
-            super().__init__(parent)
-
-            def run():
-                res = read_fn()
-                self.result_ready.emit(res)
-
-                for c in preload_coros:
-                    asyncio.run(c)
-
-            self.run = run
-
-
     def load_file(self, fileName, index=None):
         if self._gfxview:
             self._gfxview.show()
@@ -296,15 +336,13 @@ class ImageViewer(QtWidgets.QWidget):
             message = f'Read "{fileName}", {w}x{h}, Depth: {d} ({description})'
             logging.info(message)
 
-        # img = self._read_image(fileName)
-        t = self.LoadFileThread(lambda: self._read_image(fileName), self.get_preload_coros(), parent=self)
+        t = LoadFileThread(
+            lambda: self._read_image(fileName),
+            parent=self,
+        )
+    
         t.result_ready.connect(callback)
-
-        def finished():
-            t.deleteLater()
-        t.finished.connect(finished)
-
-        t.start()
+        self._load_image_thread_replaceable_waiter.submit_thread(t)
 
 
     @functools.lru_cache(maxsize=IMAGE_PRELOAD_MAX)
@@ -493,17 +531,14 @@ class ImageViewer(QtWidgets.QWidget):
         Pre-read images asynchronously to fill up LRU cache for _read_image.
         Up to `IMAGE_PRELOAD_MAX`.
         """
-        if not self._current_file or not self._ordered_files:
-            logging.debug("Nothing to preread")
-            return
 
-        window_start = max(self._current_file[0] - int(IMAGE_PRELOAD_MAX / 2), 0)
-        window_end = min(
-            self._current_file[0] + int(IMAGE_PRELOAD_MAX / 2), len(self._ordered_files)
+        t = PreloadFilesThread(
+            self.get_preload_coros(),
+            parent=self,
         )
-
-        for i in range(window_start, window_end):
-            thread.submit_async(self._read_image_async(self._ordered_files[i]), self._ordered_files[i])
+    
+        self._preload_images_thread_replaceable_waiter.submit_thread(t)
+        return
 
     def get_preload_coros(self):
         """
@@ -514,14 +549,31 @@ class ImageViewer(QtWidgets.QWidget):
             logging.debug("Nothing to preread")
             return []
 
-        window_start = max(self._current_file[0] - int(IMAGE_PRELOAD_MAX / 2), 0)
-        window_end = min(
-            self._current_file[0] + int(IMAGE_PRELOAD_MAX / 2), len(self._ordered_files)
-        )
-
         preload_coros = []
-        for i in range(window_start, window_end):
-            preload_coros.append(self._read_image_async(self._ordered_files[i]))
+        window_size = 0
+        window_start = window_end = self._current_file[0]
+        while window_size < IMAGE_PRELOAD_MAX - 1:
+            # Check after current file (prefer)
+            if window_end + 1 < len(self._ordered_files):
+                window_end += 1
+                preload_coros.append(
+                    self._read_image_async(self._ordered_files[window_end]),
+                )
+                window_size += 1
+
+            # Check before current file
+            if window_size < IMAGE_PRELOAD_MAX and window_start - 1 >= 0:
+                window_start -= 1
+                preload_coros.append(
+                    self._read_image_async(self._ordered_files[window_start]),
+                )
+                window_size += 1
+
+            # Break if we've reached both ends of self._ordered_files
+            if window_start == 0 and window_end == len(self._ordered_files) - 1:
+                break
+
+        logging.debug(f"Preload window: {window_start}, {window_end}")
 
         return preload_coros
             
@@ -540,6 +592,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = 0, self._ordered_files[0]
         self.load_file(self._ordered_files[0], 0)
+        self.preload()
 
     def _next_photo(self):
         """
@@ -557,6 +610,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = next_idx, self._ordered_files[next_idx]
         self.load_file(self._ordered_files[next_idx], next_idx)
+        self.preload()
 
     def _prev_photo(self):
         """
@@ -574,6 +628,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = prev_idx, self._ordered_files[prev_idx]
         self.load_file(self._ordered_files[prev_idx], prev_idx)
+        self.preload()
 
     def _discard_current_photo(self):
         """

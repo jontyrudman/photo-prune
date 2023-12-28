@@ -3,7 +3,6 @@ import logging
 import os
 from typing import Callable
 from PySide6 import QtCore, QtWidgets, QtGui
-from async_helper import thread
 
 from image_viewer import ImageViewer
 from landing import Landing
@@ -144,7 +143,5 @@ if __name__ == "__main__":
     photo_prune = PhotoPrune()
     photo_prune.show()
     
-    thread.start_async()
     exit_code = app.exec()
-    thread.stop_async()
     sys.exit(exit_code)
