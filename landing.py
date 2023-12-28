@@ -1,9 +1,7 @@
-from typing import Callable
 from PySide6 import QtWidgets, QtCore
 
 
 class Landing(QtWidgets.QWidget):
-    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
     placeholder = None
     confirm_sig = QtCore.Signal(
         str, bool, bool, arguments=["folder", "include_std_img", "include_raw_img"]
@@ -11,7 +9,7 @@ class Landing(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super(Landing, self).__init__(parent)
-        self.layout = QtWidgets.QVBoxLayout(self)
+        layout = QtWidgets.QVBoxLayout(self)
 
         self._dir_select_layout = QtWidgets.QHBoxLayout()
         self._dir_line_edit = QtWidgets.QLineEdit(
@@ -34,12 +32,14 @@ class Landing(QtWidgets.QWidget):
         self._confirm_button = QtWidgets.QPushButton("Prune")
         self._confirm_button.clicked.connect(self._on_confirm)
 
-        self.layout.addLayout(self._dir_select_layout)
-        self.layout.addWidget(self._show_std_button)
-        self.layout.addWidget(self._show_raw_button)
-        self.layout.addWidget(
+        layout.addLayout(self._dir_select_layout)
+        layout.addWidget(self._show_std_button)
+        layout.addWidget(self._show_raw_button)
+        layout.addWidget(
             self._confirm_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
         )
+
+        self.setLayout(layout)
 
     def _on_confirm(self):
         self.confirm_sig.emit(

@@ -4,7 +4,7 @@ import os
 import logging
 import platform
 import subprocess
-from typing import Callable
+from typing import Callable, Coroutine
 from PySide6 import QtWidgets, QtGui, QtCore
 
 
@@ -16,12 +16,11 @@ ACCEPTED_FILE_EXTENSIONS = {
     "raw": [".nef", ".raf", ".cr2", ".tiff"],  # For now
 }
 
-IMAGE_PRELOAD_MAX = 10  # Use memory max instead
+IMAGE_PRELOAD_MAX = 16
+IMAGE_LOAD_DISPLAY_TIMEOUT_S = 0.35
 
 
 class NoMoreImages(QtWidgets.QWidget):
-    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
-
     _text: QtWidgets.QLabel | None = None
     _landing_button: QtWidgets.QPushButton | None = None
 
@@ -30,9 +29,6 @@ class NoMoreImages(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(NoMoreImages, self).__init__(parent)
 
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-
         self._text = QtWidgets.QLabel()
         self._text.setText("No images to display.")
 
@@ -40,33 +36,32 @@ class NoMoreImages(QtWidgets.QWidget):
         self._landing_button.setText("Return")
         self._landing_button.clicked.connect(self.landing_button_sig.emit)
 
-        self.layout.addWidget(self._text)
-        self.layout.addWidget(
-            self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
-        )
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._text)
+        layout.addWidget(self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setLayout(layout)
 
 
 class Overlay(QtWidgets.QWidget):
-    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
-
     _filename_label: QtWidgets.QLabel | None = None
     _position_label: QtWidgets.QLabel | None = None
 
     def __init__(self, parent=None):
         super(Overlay, self).__init__(parent)
 
-        self.layout = QtWidgets.QHBoxLayout(self)
-        self.layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignBottom)
-        self.layout.setContentsMargins(5, 2, 5, 2)
-        self.layout.setSpacing(0)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignBottom)
+        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setSpacing(0)
 
         self._filename_label = QtWidgets.QLabel()
         self._position_label = QtWidgets.QLabel()
 
-        self.layout.addWidget(self._filename_label)
-        self.layout.addWidget(
-            self._position_label, alignment=QtCore.Qt.AlignmentFlag.AlignRight
-        )
+        layout.addWidget(self._filename_label)
+        layout.addWidget(self._position_label, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        self.setLayout(layout)
+
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def set_filename(self, filename: str | None):
@@ -118,35 +113,183 @@ class ReplaceableWaiter:
 
 class LoadFileThread(QtCore.QThread):
     result_ready = QtCore.Signal(QtGui.QImage)
+    _read_fn: Callable | None = None
 
     def __init__(self, read_fn, parent=None):
         super().__init__(parent)
+        self._read_fn = read_fn
 
-        def run(*args):
-            res = read_fn()
-            self.result_ready.emit(res)
-
-        self.run = run
+    def run(self, *args):
+        if not self._read_fn:
+            return
+        res = self._read_fn()
+        self.result_ready.emit(res)
 
 
 class PreloadFilesThread(QtCore.QThread):
+    _preload_coros: list[Coroutine] = []
+
     def __init__(self, preload_coros: list = [], parent=None):
         super().__init__(parent)
+        self._preload_coros = preload_coros
 
-        def run(*args):
-            for c in preload_coros:
-                asyncio.run(c)
+    def run(self, *args):
+        for c in self._preload_coros:
+            asyncio.run(c)
 
-        self.run = run
+
+class GraphicsView(QtWidgets.QGraphicsView):
+    _image: QtGui.QImage | None = None
+    _img_scale: float = 1.0
+    _pixmap_in_scene: QtWidgets.QGraphicsPixmapItem | None = None
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setBackgroundRole(QtGui.QPalette.ColorRole.Base)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Ignored
+        )
+        self.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QtWidgets.QGraphicsView.ViewportAnchor.NoAnchor)
+
+        self.setViewportMargins(*PHOTO_MARGINS)
+
+        self.wheelEvent = self._on_scroll
+        self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+    def _on_scroll(self, event: QtGui.QWheelEvent):
+        _d = event.angleDelta().y()
+        _scale_multiplier = 0.2
+        self.scale(1 + ((_d / 120) * _scale_multiplier))
+
+    def fit_to_viewport(self):
+        self._fit_to_size(
+            self.viewport().width(),
+            self.viewport().height(),
+        )
+
+    def scale(self, scale_factor):
+        if self._image is None or self._pixmap_in_scene is None:
+            return
+
+        new_img_scale = self._img_scale * scale_factor
+        if new_img_scale > 2:
+            logging.debug("Scale too high", new_img_scale)
+            return
+
+        viewport = self.viewport()
+        vw_width = viewport.width()
+        vw_height = viewport.height()
+        if (
+            self._image.width() * new_img_scale < vw_width
+            and self._image.height() * new_img_scale < vw_height
+        ) and scale_factor < 1:
+            logging.debug(
+                "New dimensions would be smaller than viewport, fitting to viewport instead"
+            )
+            self.fit_to_viewport()
+            return
+
+        self._img_scale = new_img_scale
+
+        scene = self.scene()
+
+        old_scene_dx = self.viewportTransform().dx() - viewport.width() / 2
+        old_scene_dy = self.viewportTransform().dy() - viewport.height() / 2
+        new_scene_dx = old_scene_dx * scale_factor
+        new_scene_dy = old_scene_dy * scale_factor
+
+        self._pixmap_in_scene.setPixmap(
+            QtGui.QPixmap.fromImage(self._image).scaled(
+                self._image.width() * self._img_scale,
+                self._image.height() * self._img_scale,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+        scene.setSceneRect(scene.itemsBoundingRect())
+        self.centerOn(-new_scene_dx, -new_scene_dy)
+
+        self._log_view_sizes()
+
+    def _log_view_sizes(self):
+        logging.debug(f"GFXVIEW size {str(self.size())}")
+        logging.debug(f"SCENE size {str(self.scene().sceneRect())}")
+        logging.debug(
+            f"PIXMAP size {str(self._pixmap_in_scene.pixmap().size())}"
+        ) if self._pixmap_in_scene else None
+
+    def _fill_parent(self):
+        self.resize(self.parentWidget().size())
+        self.viewport().resize(self.maximumViewportSize())
+
+    def _fit_to_size(self, w, h):
+        if self._image is None or self._pixmap_in_scene is None:
+            raise Exception
+
+        sf_width = w / self._image.width()
+        sf_height = h / self._image.height()
+        self._img_scale = min(sf_width, sf_height)
+        scene = self.scene()
+
+        self._log_view_sizes()
+
+        new_width = self._image.width() * self._img_scale
+        new_height = self._image.height() * self._img_scale
+
+        self._pixmap_in_scene.setPixmap(
+            QtGui.QPixmap.fromImage(self._image).scaled(
+                new_width,
+                new_height,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.centerOn(self._pixmap_in_scene)
+        scene.setSceneRect(scene.itemsBoundingRect())
+
+    @functools.lru_cache(maxsize=IMAGE_PRELOAD_MAX)
+    def qimage_from_file(self, fpath: str):
+        logging.debug(f"Reading image from {fpath}...")
+        reader = QtGui.QImageReader(fpath)
+        reader.setAutoTransform(True)
+        new_image = reader.read()
+        native_filename = QtCore.QDir.toNativeSeparators(fpath)
+        if new_image.isNull():
+            error = reader.errorString()
+            QtWidgets.QMessageBox.information(
+                self,
+                QtGui.QGuiApplication.applicationDisplayName(),
+                f"Cannot load {native_filename}: {error}",
+            )
+            raise Exception
+
+        return new_image
+
+    def set_image(self, new_image: QtGui.QImage):
+        self._image = new_image
+        if self._image.colorSpace().isValid():
+            self._image.convertToColorSpace(QtGui.QColorSpace.NamedColorSpace.SRgb)
+
+        sf_width = self.viewport().width() / self._image.width()
+        sf_height = self.viewport().height() / self._image.height()
+        self._img_scale = min(sf_width, sf_height)
+
+        gfxscene = QtWidgets.QGraphicsScene()
+        self._pixmap_in_scene = gfxscene.addPixmap(QtGui.QPixmap.fromImage(self._image))
+        self.setScene(gfxscene)
+        self.fit_to_viewport()
+
+    def set_image_hidden(self, hidden: bool):
+        if self._pixmap_in_scene:
+            self._pixmap_in_scene.setVisible(not hidden)
 
 
 class ImageViewer(QtWidgets.QWidget):
-    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
-
-    _image: QtGui.QImage | None = None
-    _img_scale: float = 1.0
-    _gfxview: QtWidgets.QGraphicsView | None = None
-    _pixmap_in_scene: QtWidgets.QGraphicsPixmapItem | None = None
+    _gfxview: GraphicsView | None = None
     _last_window_state: QtCore.Qt.WindowState | None = None
 
     _cwd: str | None = None
@@ -156,6 +299,7 @@ class ImageViewer(QtWidgets.QWidget):
     _current_file: tuple[int, str] | None = None
     _include_standard_image_ext: bool = True
     _include_raw_image_ext: bool = False
+    _time_image_last_loaded_s: float | None = None
 
     _no_images_layout: NoMoreImages | None = None
     _overlay: Overlay | None = None
@@ -169,16 +313,11 @@ class ImageViewer(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super(ImageViewer, self).__init__(parent)
 
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self._gfxview = GraphicsView()
 
-        self._img_scale = 1.0
-
-        self._set_up_gfxview()
-        if self._gfxview is None:
-            raise Exception
-
-        self.layout.addWidget(self._gfxview)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._gfxview)
 
         # Event callbacks
         self.resizeEvent = self._on_resize
@@ -186,7 +325,10 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._set_up_shortcuts()
         self._set_up_no_images_layout()
+
         self._overlay = Overlay(self)
+
+        self.setLayout(layout)
 
     def _set_up_no_images_layout(self):
         self._no_images_layout = NoMoreImages(self)
@@ -194,44 +336,33 @@ class ImageViewer(QtWidgets.QWidget):
         self._no_images_layout.resize(self.size())
         self._no_images_layout.landing_button_sig.connect(self.back_to_landing_sig.emit)
 
-    def _set_up_gfxview(self):
-        self._gfxview = QtWidgets.QGraphicsView()
-        self._gfxview.setBackgroundRole(QtGui.QPalette.ColorRole.Base)
-        self._gfxview.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Ignored
-        )
-        self._gfxview.setDragMode(QtWidgets.QGraphicsView.DragMode.ScrollHandDrag)
-        self._gfxview.setTransformationAnchor(
-            QtWidgets.QGraphicsView.ViewportAnchor.NoAnchor
-        )
-
-        self._gfxview.setViewportMargins(*PHOTO_MARGINS)
-
-        self._gfxview.wheelEvent = self._on_scroll
-        self._gfxview.setHorizontalScrollBarPolicy(
-            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._gfxview.setVerticalScrollBarPolicy(
-            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-
     def _set_up_shortcuts(self):
+        def scale(_sf: float):
+            if not self._gfxview:
+                return
+            self._gfxview.scale(_sf)
+
+        def fit_to_viewport():
+            if not self._gfxview:
+                return
+            self._gfxview.fit_to_viewport()
+
         # Zoom bindings
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Equal),
             self,
-            lambda: self.fit_to_viewport(),
+            fit_to_viewport,
         )
         QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_Plus), self, lambda: self._scale(1.1)
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_Plus), self, lambda: scale(1.1)
         )
         QtGui.QShortcut(
-            QtGui.QKeySequence(QtGui.Qt.Key.Key_Minus), self, lambda: self._scale(0.9)
+            QtGui.QKeySequence(QtGui.Qt.Key.Key_Minus), self, lambda: scale(0.9)
         )
         QtGui.QShortcut(
             QtGui.QKeySequence(QtGui.Qt.Key.Key_Underscore),
             self,
-            lambda: self._scale(0.9),
+            lambda: scale(0.9),
         )
 
         # We get Shift+Arrow translate for free
@@ -278,51 +409,36 @@ class ImageViewer(QtWidgets.QWidget):
                 self._gfxview.scene().width() < self._gfxview.viewport().width()
                 or self._gfxview.scene().height() < self._gfxview.viewport().height()
             ):
-                self.fit_to_viewport()
+                self._gfxview.fit_to_viewport()
 
-    def _on_scroll(self, event: QtGui.QWheelEvent):
-        _d = event.angleDelta().y()
-        _scale_multiplier = 0.2
-        self._scale(1 + ((_d / 120) * _scale_multiplier))
-
-    def gfxview_fill_space(self):
-        if self._gfxview is None:
+    def load_file(self, fpath: str, index: int):
+        if not self._gfxview:
             raise Exception
-        self._gfxview.resize(self.parentWidget().size())
-        self._gfxview.viewport().resize(self._gfxview.maximumViewportSize())
 
-    def load_file(self, fileName, index=None):
-        if self._gfxview:
-            self._gfxview.show()
-        if self._pixmap_in_scene:
-            self._pixmap_in_scene.show()
-        if self._overlay:
-            self._overlay.show()
         if self._no_images_layout:
             self._no_images_layout.hide()
 
         if self._overlay:
-            self._overlay.set_filename(f"{os.path.basename(fileName)} loading...")
+            self._overlay.show()
+            self._overlay.set_filename(f"{os.path.basename(fpath)} loading...")
             if self._current_file:
                 self._overlay.set_position(
                     self._current_file[0] + 1, len(self._ordered_files)
                 )
-        if self._pixmap_in_scene:
-            self._pixmap_in_scene.hide()
 
-        def callback(img):
+        def callback(_img: QtGui.QImage):
             # If it's a stale thread arriving late it won't match our _current_file index
             if self._current_file and index and index != self._current_file[0]:
                 logging.debug("Stale image load detected; not setting image")
                 return
-            self._set_image(img)
-            self.setWindowFilePath(fileName)
 
-            if self._image is None:
+            if not self._gfxview:
                 raise Exception
 
-            if self._pixmap_in_scene:
-                self._pixmap_in_scene.show()
+            self._gfxview.set_image(_img)
+            self._gfxview.set_image_hidden(False)
+            self.setWindowFilePath(fpath)
+
             if self._overlay:
                 if self._current_file:
                     self._overlay.set_filename(os.path.basename(self._current_file[1]))
@@ -330,163 +446,28 @@ class ImageViewer(QtWidgets.QWidget):
                         self._current_file[0] + 1, len(self._ordered_files)
                     )
 
-            w = self._image.width()
-            h = self._image.height()
-            d = self._image.depth()
-            color_space = self._image.colorSpace()
+            w = _img.width()
+            h = _img.height()
+            d = _img.depth()
+            color_space = _img.colorSpace()
             description = (
                 color_space.description() if color_space.isValid() else "unknown"
             )
-            message = f'Read "{fileName}", {w}x{h}, Depth: {d} ({description})'
+            message = f'Read "{fpath}", {w}x{h}, Depth: {d} ({description})'
             logging.info(message)
 
+        def qimage_from_file():
+            if not self._gfxview:
+                raise Exception
+            return self._gfxview.qimage_from_file(fpath)
+
         t = LoadFileThread(
-            lambda: self._read_image(fileName),
+            qimage_from_file,
             parent=self,
         )
 
         t.result_ready.connect(callback)
         self._load_image_thread_replaceable_waiter.submit_thread(t)
-
-    @functools.lru_cache(maxsize=IMAGE_PRELOAD_MAX)
-    def _read_image(self, fpath: str):
-        logging.debug(f"Reading image from {fpath}...")
-        reader = QtGui.QImageReader(fpath)
-        reader.setAutoTransform(True)
-        new_image = reader.read()
-        native_filename = QtCore.QDir.toNativeSeparators(fpath)
-        if new_image.isNull():
-            error = reader.errorString()
-            QtWidgets.QMessageBox.information(
-                self,
-                QtGui.QGuiApplication.applicationDisplayName(),
-                f"Cannot load {native_filename}: {error}",
-            )
-            raise Exception
-
-        return new_image
-
-    def _set_image(self, new_image):
-        if self._gfxview is None:
-            raise Exception
-
-        self._image = new_image
-        if self._image.colorSpace().isValid():
-            self._image.convertToColorSpace(QtGui.QColorSpace.NamedColorSpace.SRgb)
-
-        sf_width = self._gfxview.viewport().width() / self._image.width()
-        sf_height = self._gfxview.viewport().height() / self._image.height()
-        self._img_scale = min(sf_width, sf_height)
-
-        gfxscene = QtWidgets.QGraphicsScene()
-        self._pixmap_in_scene = gfxscene.addPixmap(QtGui.QPixmap.fromImage(self._image))
-        self._gfxview.setScene(gfxscene)
-        self.fit_to_viewport()
-
-    def _translate(self, x, y):
-        if self._gfxview is None:
-            raise Exception
-
-        self._gfxview.translate(x, y)
-
-    def fit_to_viewport(self):
-        if self._gfxview is None:
-            logging.debug("No gfxview to fit a viewport to")
-            return
-
-        self._fit_to_size(
-            self._gfxview.viewport().width(),
-            self._gfxview.viewport().height(),
-        )
-
-    def _fit_to_size(self, w, h):
-        if (
-            self._image is None
-            or self._gfxview is None
-            or self._pixmap_in_scene is None
-        ):
-            raise Exception
-
-        sf_width = w / self._image.width()
-        sf_height = h / self._image.height()
-        self._img_scale = min(sf_width, sf_height)
-        scene = self._gfxview.scene()
-
-        self._log_view_sizes()
-
-        new_width = self._image.width() * self._img_scale
-        new_height = self._image.height() * self._img_scale
-
-        self._pixmap_in_scene.setPixmap(
-            QtGui.QPixmap.fromImage(self._image).scaled(
-                new_width,
-                new_height,
-                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation,
-            )
-        )
-        self._gfxview.centerOn(self._pixmap_in_scene)
-        scene.setSceneRect(scene.itemsBoundingRect())
-
-    def _scale(self, scale_factor):
-        if (
-            self._image is None
-            or self._gfxview is None
-            or self._pixmap_in_scene is None
-        ):
-            return
-
-        new_img_scale = self._img_scale * scale_factor
-        if new_img_scale > 2:
-            logging.debug("Scale too high", new_img_scale)
-            return
-
-        viewport = self._gfxview.viewport()
-        vw_width = viewport.width()
-        vw_height = viewport.height()
-        if (
-            self._image.width() * new_img_scale < vw_width
-            and self._image.height() * new_img_scale < vw_height
-        ) and scale_factor < 1:
-            logging.debug(
-                "New dimensions would be smaller than viewport, fitting to viewport instead"
-            )
-            self.fit_to_viewport()
-            return
-
-        self._img_scale = new_img_scale
-
-        scene = self._gfxview.scene()
-
-        old_scene_dx = self._gfxview.viewportTransform().dx() - viewport.width() / 2
-        old_scene_dy = self._gfxview.viewportTransform().dy() - viewport.height() / 2
-        new_scene_dx = old_scene_dx * scale_factor
-        new_scene_dy = old_scene_dy * scale_factor
-
-        self._pixmap_in_scene.setPixmap(
-            QtGui.QPixmap.fromImage(self._image).scaled(
-                self._image.width() * self._img_scale,
-                self._image.height() * self._img_scale,
-                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
-                QtCore.Qt.TransformationMode.SmoothTransformation,
-            )
-        )
-
-        scene.setSceneRect(scene.itemsBoundingRect())
-        self._gfxview.centerOn(-new_scene_dx, -new_scene_dy)
-
-        self._log_view_sizes()
-
-    def _log_view_sizes(self):
-        logging.debug(
-            f"GFXVIEW size {str(self._gfxview.size())}"
-        ) if self._gfxview else None
-        logging.debug(
-            f"SCENE size {str(self._gfxview.scene().sceneRect())}"
-        ) if self._gfxview else None
-        logging.debug(
-            f"PIXMAP size {str(self._pixmap_in_scene.pixmap().size())}"
-        ) if self._pixmap_in_scene else None
 
     def _scan_cwd(self):
         """
@@ -527,7 +508,10 @@ class ImageViewer(QtWidgets.QWidget):
         self._ordered_files = sorted(paths, key=str.lower)
 
     async def _read_image_async(self, fpath: str):
-        return self._read_image(fpath)
+        if not self._gfxview:
+            raise Exception
+
+        return self._gfxview.qimage_from_file(fpath)
 
     def preload(self):
         """
@@ -678,8 +662,8 @@ class ImageViewer(QtWidgets.QWidget):
         if self._overlay is not None:
             self._overlay.hide()
 
-        if self._pixmap_in_scene is not None:
-            self._pixmap_in_scene.hide()
+        if self._gfxview is not None:
+            self._gfxview.set_image_hidden(True)
 
         if self._no_images_layout is not None:
             self._no_images_layout.show()

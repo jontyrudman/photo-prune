@@ -1,7 +1,6 @@
 import sys
 import logging
 import os
-from typing import Callable
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from image_viewer import ImageViewer
@@ -10,7 +9,6 @@ from stylesheet import stylesheet
 
 
 class PhotoPrune(QtWidgets.QWidget):
-    layout: Callable[..., QtWidgets.QLayout] | QtWidgets.QLayout
     image_viewer: ImageViewer | None = None
     landing: Landing
 
@@ -20,11 +18,11 @@ class PhotoPrune(QtWidgets.QWidget):
         self.setStyleSheet(stylesheet)
         self.setWindowTitle("Photo Prune")
 
-        self.layout = QtWidgets.QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self.landing = Landing()
-        self.layout.addWidget(self.landing)
+        layout.addWidget(self.landing)
 
         self.fix_size_to_min()
 
@@ -36,15 +34,13 @@ class PhotoPrune(QtWidgets.QWidget):
 
         self.landing.confirm_sig.connect(self._switch_to_viewer)
 
-        self._set_up_image_viewer()
-
-    def _set_up_image_viewer(self):
-        """Because we might tear it down"""
         self.image_viewer = ImageViewer()
-        self.layout.addWidget(self.image_viewer)
         self.image_viewer.hide()
         self.image_viewer.back_to_landing_sig.connect(self._switch_to_landing)
         self.image_viewer.fullscreen_sig.connect(self._fullscreen)
+
+        layout.addWidget(self.image_viewer)
+        self.setLayout(layout)
 
     def _fullscreen(self):
         if self.windowState() == QtCore.Qt.WindowState.WindowFullScreen:
@@ -86,7 +82,6 @@ class PhotoPrune(QtWidgets.QWidget):
             _err("Folder doesn't exist.")
             return
 
-        self._set_up_image_viewer()
         if self.image_viewer is None:
             raise Exception
 
@@ -105,13 +100,11 @@ class PhotoPrune(QtWidgets.QWidget):
 
         self.unfix_size()
         self.resize(1280, 720)
-        self.image_viewer.gfxview_fill_space()
         self.landing.hide()
         self.image_viewer.show()
 
     @QtCore.Slot()
     def _switch_to_landing(self):
-        # TODO: Img cleanup/viewer destruction
         self.fix_size_to_min()
         if self.image_viewer:
             self.image_viewer.hide()
