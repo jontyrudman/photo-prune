@@ -486,13 +486,30 @@ class ImageViewer(QtWidgets.QWidget):
             logging.debug("Nothing to preread")
             return
 
-        window_start = max(self._current_file[0] - int(IMAGE_PRELOAD_MAX / 2), 0)
-        window_end = min(
-            self._current_file[0] + int(IMAGE_PRELOAD_MAX / 2), len(self._ordered_files)
-        )
+        window_size = 0
+        window_start = window_end = self._current_file[0]
+        while window_size < IMAGE_PRELOAD_MAX - 1:
+            # Check after current file (prefer)
+            if window_end + 1 < len(self._ordered_files):
+                window_end += 1
+                thread.submit_async(
+                    self._read_image_async(self._ordered_files[window_end]),
+                    self._ordered_files[window_end]
+                )
+                window_size += 1
 
-        for i in range(window_start, window_end):
-            thread.submit_async(self._read_image_async(self._ordered_files[i]), self._ordered_files[i])
+            # Check before current file
+            if window_size < IMAGE_PRELOAD_MAX and window_start - 1 >= 0:
+                window_start -= 1
+                thread.submit_async(
+                    self._read_image_async(self._ordered_files[window_start]),
+                    self._ordered_files[window_start]
+                )
+                window_size += 1
+
+            # Break if we've reached both ends of self._ordered_files
+            if window_start == 0 and window_end == len(self._ordered_files) - 1:
+                break
             
 
     def load_folder(self, folder: str):
