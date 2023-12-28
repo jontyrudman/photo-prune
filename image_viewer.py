@@ -17,7 +17,7 @@ ACCEPTED_FILE_EXTENSIONS = {
 }
 
 IMAGE_PRELOAD_MAX = 16
-IMAGE_LOAD_DISPLAY_TIMEOUT_S = 0.35
+IMAGE_LOAD_DISPLAY_TIMEOUT_S = 0.35  # TODO: Use this to make pixmap blank
 
 
 class NoMoreImages(QtWidgets.QWidget):
@@ -39,7 +39,9 @@ class NoMoreImages(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._text)
-        layout.addWidget(self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(
+            self._landing_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
+        )
         self.setLayout(layout)
 
 
@@ -59,7 +61,9 @@ class Overlay(QtWidgets.QWidget):
         self._position_label = QtWidgets.QLabel()
 
         layout.addWidget(self._filename_label)
-        layout.addWidget(self._position_label, alignment=QtCore.Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(
+            self._position_label, alignment=QtCore.Qt.AlignmentFlag.AlignRight
+        )
         self.setLayout(layout)
 
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
