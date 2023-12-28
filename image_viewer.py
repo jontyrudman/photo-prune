@@ -122,7 +122,7 @@ class LoadFileThread(QtCore.QThread):
     def __init__(self, read_fn, parent=None):
         super().__init__(parent)
 
-        def run():
+        def run(*args):
             res = read_fn()
             self.result_ready.emit(res)
 
@@ -133,7 +133,7 @@ class PreloadFilesThread(QtCore.QThread):
     def __init__(self, preload_coros: list = [], parent=None):
         super().__init__(parent)
 
-        def run():
+        def run(*args):
             for c in preload_coros:
                 asyncio.run(c)
 
