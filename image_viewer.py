@@ -1,4 +1,5 @@
 import functools
+import asyncio
 import os
 import logging
 import platform
@@ -235,12 +236,18 @@ class ImageViewer(QtWidgets.QWidget):
     class LoadFileThread(QtCore.QThread):
         result_ready = QtCore.Signal(QtGui.QImage)
 
-        def __init__(self, read_fn, parent=None):
+        def __init__(self, read_fn, preload_coros: list=[], parent=None):
             super().__init__(parent)
+
             def run():
                 res = read_fn()
                 self.result_ready.emit(res)
+
+                for c in preload_coros:
+                    asyncio.run(c)
+
             self.run = run
+
 
     def load_file(self, fileName, index=None):
         if self._gfxview:
@@ -253,7 +260,7 @@ class ImageViewer(QtWidgets.QWidget):
             self._no_images_layout.hide()
 
         if self._overlay:
-            self._overlay.set_filename(f"Loading {os.path.basename(fileName)}...")
+            self._overlay.set_filename(f"{os.path.basename(fileName)} loading...")
             if self._current_file:
                 self._overlay.set_position(
                     self._current_file[0] + 1, len(self._ordered_files)
@@ -290,9 +297,13 @@ class ImageViewer(QtWidgets.QWidget):
             logging.info(message)
 
         # img = self._read_image(fileName)
-        t = self.LoadFileThread(lambda: self._read_image(fileName), self)
+        t = self.LoadFileThread(lambda: self._read_image(fileName), self.get_preload_coros(), parent=self)
         t.result_ready.connect(callback)
-        t.finished.connect(t.deleteLater)
+
+        def finished():
+            t.deleteLater()
+        t.finished.connect(finished)
+
         t.start()
 
 
@@ -493,6 +504,26 @@ class ImageViewer(QtWidgets.QWidget):
 
         for i in range(window_start, window_end):
             thread.submit_async(self._read_image_async(self._ordered_files[i]), self._ordered_files[i])
+
+    def get_preload_coros(self):
+        """
+        Pre-read images asynchronously to fill up LRU cache for _read_image.
+        Up to `IMAGE_PRELOAD_MAX`.
+        """
+        if not self._current_file or not self._ordered_files:
+            logging.debug("Nothing to preread")
+            return []
+
+        window_start = max(self._current_file[0] - int(IMAGE_PRELOAD_MAX / 2), 0)
+        window_end = min(
+            self._current_file[0] + int(IMAGE_PRELOAD_MAX / 2), len(self._ordered_files)
+        )
+
+        preload_coros = []
+        for i in range(window_start, window_end):
+            preload_coros.append(self._read_image_async(self._ordered_files[i]))
+
+        return preload_coros
             
 
     def load_folder(self, folder: str):
@@ -509,8 +540,6 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = 0, self._ordered_files[0]
         self.load_file(self._ordered_files[0], 0)
-
-        self.preload()
 
     def _next_photo(self):
         """
@@ -529,8 +558,6 @@ class ImageViewer(QtWidgets.QWidget):
         self._current_file = next_idx, self._ordered_files[next_idx]
         self.load_file(self._ordered_files[next_idx], next_idx)
 
-        self.preload()
-
     def _prev_photo(self):
         """
         Move to whichever photo is evaluated by asc alphabetical filename as being previous.
@@ -547,8 +574,6 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = prev_idx, self._ordered_files[prev_idx]
         self.load_file(self._ordered_files[prev_idx], prev_idx)
-
-        self.preload()
 
     def _discard_current_photo(self):
         """
