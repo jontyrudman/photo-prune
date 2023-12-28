@@ -78,6 +78,7 @@ jobs:
         run: |
           venv\Scripts\Activate.ps1
           pyside6-deploy -c pysidedeploy.spec
+          Rename-Item -Path 'bin\photo-prune.exe' -NewName 'photo-prune_windows.exe'
       - name: Upload executable
         run:
           gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_windows.exe
