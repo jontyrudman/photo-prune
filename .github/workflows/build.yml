@@ -25,8 +25,8 @@ jobs:
       - name: Build package
         run: |
           source venv/bin/activate
-          pyside6-deploy -c pysidedeploy_linux.spec
-          chmod +x bin/photo-prune_linux.bin
+          pyside6-deploy -c pysidedeploy.spec
+          mv bin/photo-prune bin/photo-prune_linux.bin
       - name: Upload executable
         run:
           gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_linux.bin
@@ -50,7 +50,8 @@ jobs:
       - name: Build package
         run: |
           source venv/bin/activate
-          pyside6-deploy -c pysidedeploy_macos.spec
+          pyside6-deploy -c pysidedeploy.spec
+          mv bin/photo-prune bin/photo-prune_macos.bin
       - name: Upload executable
         run:
           gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_macos.bin
@@ -76,7 +77,8 @@ jobs:
       - name: Build package
         run: |
           venv\Scripts\Activate.ps1
-          pyside6-deploy -c pysidedeploy_windows.spec
+          pyside6-deploy -c pysidedeploy.spec
+          mv bin/photo-prune bin/photo-prune_windows.exe
       - name: Upload executable
         run:
           gh release upload ${{ github.event.release.tag_name }} bin/photo-prune_windows.exe

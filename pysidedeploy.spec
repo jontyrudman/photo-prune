@@ -17,7 +17,7 @@ python_path = ./venv/bin/python
 # python packages to install
 # ordered-set = increase compile time performance of nuitka packaging
 # zstandard = provides final executable size optimization
-packages = nuitka==1.5.4,ordered_set,zstandard
+packages = nuitka==1.9.5,ordered_set,zstandard
 # buildozer = for deploying Android application
 android_packages = buildozer==1.5.0,cython==0.29.33
 
@@ -32,12 +32,12 @@ wheel_pyside =
 # path to shiboken wheel
 wheel_shiboken = 
 # plugins to be copied to libs folder of the packaged application. comma separated
-plugins =
+plugins = 
 
 [nuitka]
 # (str) specify any extra nuitka arguments
 # eg = extra_args = --show-modules --follow-stdlib
-extra_args = --quiet --noinclude-qt-translations=True --output-dir=bin --output-filename=photo-prune_windows.exe
+extra_args = --quiet --noinclude-qt-translations --output-dir=bin --output-filename=photo-prune
 
 [buildozer]
 # build mode
