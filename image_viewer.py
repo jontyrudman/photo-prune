@@ -17,7 +17,7 @@ ACCEPTED_FILE_EXTENSIONS = {
 }
 
 IMAGE_PRELOAD_MAX = 16
-IMAGE_LOAD_DISPLAY_TIMEOUT_S = 0.35  # TODO: Use this to make pixmap blank
+IMAGE_LOAD_DISPLAY_TIMEOUT_S = 0.1
 
 
 class NoMoreImages(QtWidgets.QWidget):
@@ -304,6 +304,7 @@ class ImageViewer(QtWidgets.QWidget):
     _include_standard_image_ext: bool = True
     _include_raw_image_ext: bool = False
     _time_image_last_loaded_s: float | None = None
+    _image_load_timer: QtCore.QTimer | None = None
 
     _no_images_layout: NoMoreImages | None = None
     _overlay: Overlay | None = None
@@ -333,6 +334,17 @@ class ImageViewer(QtWidgets.QWidget):
         self._overlay = Overlay(self)
 
         self.setLayout(layout)
+
+        self._image_load_timer = QtCore.QTimer(self)
+        @QtCore.Slot()
+        def hide_image():
+            if not self._gfxview:
+                return
+
+            logging.debug("Taken more than {IMAGE_LOAD_DISPLAY_TIMEOUT_S}s, hiding image")
+            self._gfxview.set_image_hidden(True)
+
+        self._image_load_timer.timeout.connect(hide_image)
 
     def _set_up_no_images_layout(self):
         self._no_images_layout = NoMoreImages(self)
@@ -416,8 +428,11 @@ class ImageViewer(QtWidgets.QWidget):
                 self._gfxview.fit_to_viewport()
 
     def load_file(self, fpath: str, index: int):
-        if not self._gfxview:
+        if not self._gfxview or not self._image_load_timer:
             raise Exception
+
+        if not self._image_load_timer.isActive():
+            self._image_load_timer.start(int(IMAGE_LOAD_DISPLAY_TIMEOUT_S * 1000))
 
         if self._no_images_layout:
             self._no_images_layout.hide()
@@ -436,8 +451,10 @@ class ImageViewer(QtWidgets.QWidget):
                 logging.debug("Stale image load detected; not setting image")
                 return
 
-            if not self._gfxview:
+            if not self._gfxview or not self._image_load_timer:
                 raise Exception
+
+            self._image_load_timer.stop()
 
             self._gfxview.set_image(_img)
             self._gfxview.set_image_hidden(False)
