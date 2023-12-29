@@ -27,7 +27,7 @@ class Landing(QtWidgets.QWidget):
         self._show_std_button = QtWidgets.QCheckBox("Prune standard images")
         self._show_std_button.setChecked(True)
         self._show_raw_button = QtWidgets.QCheckBox("Prune raw images")
-        self._show_raw_button.setDisabled(True)  # TODO: Enable when raw supported
+        # self._show_raw_button.setDisabled(True)  # TODO: Enable when raw supported
 
         self._confirm_button = QtWidgets.QPushButton("Prune")
         self._confirm_button.clicked.connect(self._on_confirm)

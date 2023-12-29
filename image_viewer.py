@@ -1,3 +1,4 @@
+import time
 import functools
 import asyncio
 import os
@@ -6,6 +7,7 @@ import platform
 import subprocess
 from typing import Callable, Coroutine
 from PySide6 import QtWidgets, QtGui, QtCore
+import rawpy
 
 
 # Viewport margins left, top, right, bottom
@@ -18,6 +20,10 @@ ACCEPTED_FILE_EXTENSIONS = {
 
 IMAGE_PRELOAD_MAX = 16
 IMAGE_LOAD_DISPLAY_TIMEOUT_S = 0.1
+
+
+def _file_is_raw(fpath: str) -> bool:
+    return os.path.splitext(fpath)[1].lower() in ACCEPTED_FILE_EXTENSIONS["raw"]
 
 
 class NoMoreImages(QtWidgets.QWidget):
@@ -255,24 +261,6 @@ class GraphicsView(QtWidgets.QGraphicsView):
         self.centerOn(self._pixmap_in_scene)
         scene.setSceneRect(scene.itemsBoundingRect())
 
-    @functools.lru_cache(maxsize=IMAGE_PRELOAD_MAX)
-    def qimage_from_file(self, fpath: str):
-        logging.debug(f"Reading image from {fpath}...")
-        reader = QtGui.QImageReader(fpath)
-        reader.setAutoTransform(True)
-        new_image = reader.read()
-        native_filename = QtCore.QDir.toNativeSeparators(fpath)
-        if new_image.isNull():
-            error = reader.errorString()
-            QtWidgets.QMessageBox.information(
-                self,
-                QtGui.QGuiApplication.applicationDisplayName(),
-                f"Cannot load {native_filename}: {error}",
-            )
-            raise Exception
-
-        return new_image
-
     def set_image(self, new_image: QtGui.QImage):
         self._image = new_image
         if self._image.colorSpace().isValid():
@@ -336,12 +324,15 @@ class ImageViewer(QtWidgets.QWidget):
         self.setLayout(layout)
 
         self._image_load_timer = QtCore.QTimer(self)
+
         @QtCore.Slot()
         def hide_image():
             if not self._gfxview:
                 return
 
-            logging.debug("Taken more than {IMAGE_LOAD_DISPLAY_TIMEOUT_S}s, hiding image")
+            logging.debug(
+                f"Taken more than {IMAGE_LOAD_DISPLAY_TIMEOUT_S}s, hiding image"
+            )
             self._gfxview.set_image_hidden(True)
 
         self._image_load_timer.timeout.connect(hide_image)
@@ -427,6 +418,55 @@ class ImageViewer(QtWidgets.QWidget):
             ):
                 self._gfxview.fit_to_viewport()
 
+    @functools.lru_cache(maxsize=IMAGE_PRELOAD_MAX)
+    def qimage_from_file_auto(self, fpath: str):
+        if _file_is_raw(fpath):
+            return self.qimage_from_raw_file(fpath)
+        else:
+            return self.qimage_from_std_file(fpath)
+
+    def qimage_from_std_file(self, fpath: str):
+        logging.debug(f"Reading image from {fpath}...")
+        reader = QtGui.QImageReader(fpath)
+        reader.setAutoTransform(True)
+        new_image = reader.read()
+        native_filename = QtCore.QDir.toNativeSeparators(fpath)
+        if new_image.isNull():
+            error = reader.errorString()
+            QtWidgets.QMessageBox.information(
+                self,
+                QtGui.QGuiApplication.applicationDisplayName(),
+                f"Cannot load {native_filename}: {error}",
+            )
+            raise Exception
+
+        return new_image
+
+    def qimage_from_raw_file(self, fpath: str) -> QtGui.QImage:
+        logging.debug(f"Reading raw image from {fpath}...")
+
+        try:
+            with rawpy.imread(fpath) as raw:
+                rgb = raw.postprocess()
+                new_image = QtGui.QImage(
+                    rgb.data,
+                    rgb.shape[1],
+                    rgb.shape[0],
+                    rgb.strides[0],
+                    QtGui.QImage.Format.Format_RGB888,
+                )
+        except Exception as e:
+            native_filename = QtCore.QDir.toNativeSeparators(fpath)
+            QtWidgets.QMessageBox.information(
+                self,
+                QtGui.QGuiApplication.applicationDisplayName(),
+                f"Cannot load {native_filename}: {str(e)}",
+            )
+            raise Exception
+
+        return new_image
+
+
     def load_file(self, fpath: str, index: int):
         if not self._gfxview or not self._image_load_timer:
             raise Exception
@@ -477,10 +517,12 @@ class ImageViewer(QtWidgets.QWidget):
             message = f'Read "{fpath}", {w}x{h}, Depth: {d} ({description})'
             logging.info(message)
 
+            self.preload()
+
         def qimage_from_file():
             if not self._gfxview:
                 raise Exception
-            return self._gfxview.qimage_from_file(fpath)
+            return self.qimage_from_file_auto(fpath)
 
         t = LoadFileThread(
             qimage_from_file,
@@ -528,18 +570,11 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._ordered_files = sorted(paths, key=str.lower)
 
-    async def _read_image_async(self, fpath: str):
-        if not self._gfxview:
-            raise Exception
-
-        return self._gfxview.qimage_from_file(fpath)
-
     def preload(self):
         """
         Pre-read images asynchronously to fill up LRU cache for _read_image.
         Up to `IMAGE_PRELOAD_MAX`.
         """
-
         t = PreloadFilesThread(
             self.get_preload_coros(),
             parent=self,
@@ -557,6 +592,12 @@ class ImageViewer(QtWidgets.QWidget):
             logging.debug("Nothing to preread")
             return []
 
+        async def read_image_async(fpath: str):
+            if not self._gfxview:
+                raise Exception
+
+            return self.qimage_from_file_auto(fpath)
+
         preload_coros = []
         window_size = 0
         window_start = window_end = self._current_file[0]
@@ -565,7 +606,7 @@ class ImageViewer(QtWidgets.QWidget):
             if window_end + 1 < len(self._ordered_files):
                 window_end += 1
                 preload_coros.append(
-                    self._read_image_async(self._ordered_files[window_end]),
+                    read_image_async(self._ordered_files[window_end]),
                 )
                 window_size += 1
 
@@ -573,7 +614,7 @@ class ImageViewer(QtWidgets.QWidget):
             if window_size < IMAGE_PRELOAD_MAX and window_start - 1 >= 0:
                 window_start -= 1
                 preload_coros.append(
-                    self._read_image_async(self._ordered_files[window_start]),
+                    read_image_async(self._ordered_files[window_start]),
                 )
                 window_size += 1
 
@@ -598,8 +639,15 @@ class ImageViewer(QtWidgets.QWidget):
             raise Exception("No photos in folder.")
 
         self._current_file = 0, self._ordered_files[0]
+        start = time.time_ns()
         self.load_file(self._ordered_files[0], 0)
-        self.preload()
+        end = time.time_ns()
+        logging.debug(f"Took {(end - start) / 1000000}ms to load_file")
+
+        # start = time.time_ns()
+        # self.preload()
+        # end = time.time_ns()
+        # logging.debug(f"Took {(end - start) / 1000000}ms to preload")
 
     def _next_photo(self):
         """
@@ -617,7 +665,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = next_idx, self._ordered_files[next_idx]
         self.load_file(self._ordered_files[next_idx], next_idx)
-        self.preload()
+        # self.preload()
 
     def _prev_photo(self):
         """
@@ -635,7 +683,7 @@ class ImageViewer(QtWidgets.QWidget):
 
         self._current_file = prev_idx, self._ordered_files[prev_idx]
         self.load_file(self._ordered_files[prev_idx], prev_idx)
-        self.preload()
+        # self.preload()
 
     def _discard_current_photo(self):
         """
