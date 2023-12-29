@@ -2,6 +2,7 @@ import sys
 import logging
 import os
 from PySide6 import QtCore, QtWidgets, QtGui
+import numpy  # So Nuitka doesn't ignore it
 
 from image_viewer import ImageViewer
 from landing import Landing
