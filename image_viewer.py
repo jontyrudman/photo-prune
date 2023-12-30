@@ -1,11 +1,10 @@
 import time
 import functools
-import asyncio
 import os
 import logging
 import platform
 import subprocess
-from typing import Callable, Coroutine
+from typing import Callable
 from PySide6 import QtWidgets, QtGui, QtCore
 import rawpy
 
@@ -87,40 +86,6 @@ class Overlay(QtWidgets.QWidget):
         self._position_label.setText(f"{pos}/{total}")
 
 
-class ReplaceableWaiter:
-    _waiting_thread: QtCore.QThread | None = None
-    _running_thread: QtCore.QThread | None = None
-
-    def submit_thread(self, t: QtCore.QThread):
-        t.finished.connect(self._thread_finished)
-
-        # If there's a thread running, insert a waiting thread
-        if self._running_thread:
-            logging.debug("Replacing waiting QThread")
-            self._waiting_thread = t
-
-        # Otherwise if there's no thread running, insert a running thread
-        else:
-            logging.debug("Inserting running QThread")
-            self._running_thread = t
-            self._running_thread.start()
-
-    def _thread_finished(self):
-        if self._running_thread is None:
-            return
-
-        self._running_thread.deleteLater()
-        logging.debug("Deleting finished QThread")
-        self._running_thread = None
-
-        # If there's a thread waiting, swap it out now we've run
-        if self._waiting_thread:
-            logging.debug("Replacing finished QThread")
-            self._running_thread = self._waiting_thread
-            self._waiting_thread = None
-            self._running_thread.start()
-
-
 class LoadFileThread(QtCore.QThread):
     result_ready = QtCore.Signal(QtGui.QImage)
     _read_fn: Callable | None = None
@@ -132,20 +97,68 @@ class LoadFileThread(QtCore.QThread):
     def run(self, *args):
         if not self._read_fn:
             return
+        self.setPriority(QtCore.QThread.Priority.HighestPriority)
         res = self._read_fn()
         self.result_ready.emit(res)
 
 
 class PreloadFilesThread(QtCore.QThread):
-    _preload_coros: list[Coroutine] = []
+    _preload_funcs: list[Callable] = []
+    cancelled: bool = False
 
-    def __init__(self, preload_coros: list = [], parent=None):
+    def __init__(self, preload_funcs: list = [], parent=None):
         super().__init__(parent)
-        self._preload_coros = preload_coros
+        self._preload_funcs = preload_funcs
 
     def run(self, *args):
-        for c in self._preload_coros:
-            asyncio.run(c)
+        self.setPriority(QtCore.QThread.Priority.LowestPriority)
+        for c in self._preload_funcs:
+            if self.cancelled:
+                break
+            c()
+
+    def cancel(self):
+        """Cancel a preload list before the next function in the list."""
+        logging.debug("Cancelled preload")
+        self.cancelled = True
+
+
+class ReplaceableWaiter:
+    _waiting_thread: QtCore.QThread | None = None
+    _running_thread: QtCore.QThread | None = None
+
+    def submit_thread(self, t: QtCore.QThread):
+        t.finished.connect(self._thread_finished)
+
+        # If there's a thread running, insert a waiting thread
+        if self._running_thread:
+            logging.debug(f"Replacing waiting QThread {t}")
+            self._waiting_thread = t
+
+            # Cancel between preloads if it's a PreloadFilesThread
+            if isinstance(self._running_thread, PreloadFilesThread):
+                self._running_thread.cancel()
+
+        # Otherwise if there's no thread running, insert a running thread
+        else:
+            logging.debug(f"Inserting running QThread {t}")
+            self._running_thread = t
+            self._running_thread.start()
+
+    def _thread_finished(self):
+        if self._running_thread is None:
+            return
+
+        logging.debug(f"Deleting finished QThread {self._running_thread}")
+        self._running_thread.deleteLater()
+        self._running_thread = None
+
+        # If there's a thread waiting, swap it out now we've run
+        if self._waiting_thread:
+            logging.debug(f"Replacing finished QThread {self._running_thread}")
+            self._running_thread = self._waiting_thread
+            self._waiting_thread = None
+            self._running_thread.start()
 
 
 class GraphicsView(QtWidgets.QGraphicsView):
@@ -186,7 +199,7 @@ class GraphicsView(QtWidgets.QGraphicsView):
 
         new_img_scale = self._img_scale * scale_factor
         if new_img_scale > 2:
-            logging.debug("Scale too high", new_img_scale)
+            logging.debug(f"Scale too high: {new_img_scale}")
             return
 
         viewport = self.viewport()
@@ -330,9 +343,9 @@ class ImageViewer(QtWidgets.QWidget):
             if not self._gfxview:
                 return
 
-            logging.debug(
-                f"Taken more than {IMAGE_LOAD_DISPLAY_TIMEOUT_S}s, hiding image"
-            )
+            # logging.debug(
+            #     f"Taken more than {IMAGE_LOAD_DISPLAY_TIMEOUT_S}s, hiding image"
+            # )
             self._gfxview.set_image_hidden(True)
 
         self._image_load_timer.timeout.connect(hide_image)
@@ -471,6 +484,8 @@ class ImageViewer(QtWidgets.QWidget):
         if not self._gfxview or not self._image_load_timer:
             raise Exception
 
+        start = time.time_ns()
+
         if not self._image_load_timer.isActive():
             self._image_load_timer.start(int(IMAGE_LOAD_DISPLAY_TIMEOUT_S * 1000))
 
@@ -516,6 +531,8 @@ class ImageViewer(QtWidgets.QWidget):
             )
             message = f'Read "{fpath}", {w}x{h}, Depth: {d} ({description})'
             logging.info(message)
+            end = time.time_ns()
+            logging.debug(f"Took {(end - start) / 1000000}ms to load_file")
 
             self.preload()
 
@@ -572,49 +589,35 @@ class ImageViewer(QtWidgets.QWidget):
 
     def preload(self):
         """
-        Pre-read images asynchronously to fill up LRU cache for _read_image.
-        Up to `IMAGE_PRELOAD_MAX`.
-        """
-        t = PreloadFilesThread(
-            self.get_preload_coros(),
-            parent=self,
-        )
-
-        self._preload_images_thread_replaceable_waiter.submit_thread(t)
-        return
-
-    def get_preload_coros(self):
-        """
-        Pre-read images asynchronously to fill up LRU cache for _read_image.
+        Pre-read images to fill up LRU cache for _read_image.
         Up to `IMAGE_PRELOAD_MAX`.
         """
         if not self._current_file or not self._ordered_files:
             logging.debug("Nothing to preread")
             return []
 
-        async def read_image_async(fpath: str):
-            if not self._gfxview:
-                raise Exception
+        def make_func(_fn, *_params):
+            def new_fn():
+                _fn(*_params)
+            return new_fn
 
-            return self.qimage_from_file_auto(fpath)
-
-        preload_coros = []
+        preload_funcs = []
         window_size = 0
         window_start = window_end = self._current_file[0]
         while window_size < IMAGE_PRELOAD_MAX - 1:
             # Check after current file (prefer)
             if window_end + 1 < len(self._ordered_files):
                 window_end += 1
-                preload_coros.append(
-                    read_image_async(self._ordered_files[window_end]),
+                preload_funcs.append(
+                    make_func(self.qimage_from_file_auto, self._ordered_files[window_end])
                 )
                 window_size += 1
 
             # Check before current file
             if window_size < IMAGE_PRELOAD_MAX and window_start - 1 >= 0:
                 window_start -= 1
-                preload_coros.append(
-                    read_image_async(self._ordered_files[window_start]),
+                preload_funcs.append(
+                    make_func(self.qimage_from_file_auto, self._ordered_files[window_start])
                 )
                 window_size += 1
 
@@ -624,7 +627,13 @@ class ImageViewer(QtWidgets.QWidget):
 
         logging.debug(f"Preload window: {window_start}, {window_end}")
 
-        return preload_coros
+        t = PreloadFilesThread(
+            preload_funcs,
+            parent=self,
+        )
+
+        self._preload_images_thread_replaceable_waiter.submit_thread(t)
+        return
 
     def load_folder(self, folder: str):
         """
@@ -639,15 +648,7 @@ class ImageViewer(QtWidgets.QWidget):
             raise Exception("No photos in folder.")
 
         self._current_file = 0, self._ordered_files[0]
-        start = time.time_ns()
         self.load_file(self._ordered_files[0], 0)
-        end = time.time_ns()
-        logging.debug(f"Took {(end - start) / 1000000}ms to load_file")
-
-        # start = time.time_ns()
-        # self.preload()
-        # end = time.time_ns()
-        # logging.debug(f"Took {(end - start) / 1000000}ms to preload")
 
     def _next_photo(self):
         """
