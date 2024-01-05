@@ -60,9 +60,24 @@ class PhotoPrune(QtWidgets.QWidget):
             else:
                 self.setWindowState(QtCore.Qt.WindowState.WindowNoState)
 
+    def center_window(self):
+        fr = self.frameGeometry()
+        sc = self.screen().availableGeometry()
+        fr.moveCenter(sc.center())
+        self.move(fr.topLeft())
+
     def unfix_size(self):
         self.setMinimumSize(QtCore.QSize(0, 0))
         self.setMaximumSize(QtCore.QSize(16777215, 16777215))
+        self.setWindowFlags(
+            QtCore.Qt.WindowType.Window
+            | QtCore.Qt.WindowType.CustomizeWindowHint
+            | QtCore.Qt.WindowType.WindowTitleHint
+            | QtCore.Qt.WindowType.WindowMaximizeButtonHint
+            | QtCore.Qt.WindowType.WindowMinimizeButtonHint
+            | QtCore.Qt.WindowType.WindowCloseButtonHint
+        )
+        self.show()
 
     def fix_size_to_min(self):
         self.setFixedSize(self.minimumSizeHint())
@@ -103,6 +118,7 @@ class PhotoPrune(QtWidgets.QWidget):
         self.resize(1280, 720)
         self.landing.hide()
         self.image_viewer.show()
+        self.center_window()
 
     @QtCore.Slot()
     def _switch_to_landing(self):
@@ -110,6 +126,7 @@ class PhotoPrune(QtWidgets.QWidget):
         if self.image_viewer:
             self.image_viewer.hide()
         self.landing.show()
+        self.center_window()
 
 
 def set_up_logging():
@@ -136,6 +153,6 @@ if __name__ == "__main__":
 
     photo_prune = PhotoPrune()
     photo_prune.show()
-    
+
     exit_code = app.exec()
     sys.exit(exit_code)
