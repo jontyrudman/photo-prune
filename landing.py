@@ -1,3 +1,4 @@
+import platform
 from PySide6 import QtWidgets, QtCore
 
 
@@ -50,6 +51,10 @@ class Landing(QtWidgets.QWidget):
 
     def _dir_select_dialog(self):
         dialog = QtWidgets.QFileDialog(self)
-        folder = dialog.getExistingDirectory()
+
+        if platform.system() == "Windows":
+            folder = dialog.getExistingDirectory(options=QtWidgets.QFileDialog.Option.DontUseNativeDialog)
+        else:
+            folder = dialog.getExistingDirectory()
         if folder:
             self._dir_line_edit.setText(folder)
