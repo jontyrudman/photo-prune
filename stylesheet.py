@@ -8,6 +8,7 @@ ImageViewer QGraphicsView {
 }
 
 ImageViewer QMenu {
+    color: white;
     background-color: black;
     border: 1px solid #222;
 }
