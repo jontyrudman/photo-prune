@@ -10,10 +10,11 @@ input_file = photo_prune.py
 exec_directory = ./bin
 # path to .pyproject project file
 project_file = .pyproject
+icon = ./venv/lib/python3.11/site-packages/PySide6/scripts/deploy_lib/pyside_icon.jpg
 
 [python]
 # python path
-python_path = ./venv/bin/python
+python_path = ./venv/bin/python3.11
 # python packages to install
 # ordered-set = increase compile time performance of nuitka packaging
 # zstandard = provides final executable size optimization
@@ -32,7 +33,8 @@ wheel_pyside =
 # path to shiboken wheel
 wheel_shiboken = 
 # plugins to be copied to libs folder of the packaged application. comma separated
-plugins = 
+plugins = xcbglintegrations,egldeviceintegrations,styles,platforms,platformthemes,iconengines,imageformats,generic,platforminputcontexts,accessiblebridge,platforms/darwin
+modules = DBus,Core,Gui,Widgets
 
 [nuitka]
 # (str) specify any extra nuitka arguments
