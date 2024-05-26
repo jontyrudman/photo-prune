@@ -10,7 +10,6 @@ input_file = photo_prune.py
 exec_directory = ./bin
 # path to .pyproject project file
 project_file = .pyproject
-icon = ./venv/lib/python3.11/site-packages/PySide6/scripts/deploy_lib/pyside_icon.jpg
 
 [python]
 # python path
