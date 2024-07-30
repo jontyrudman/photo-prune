@@ -33,6 +33,7 @@ class PhotoPrune(QtWidgets.QWidget):
         )
         QtGui.QShortcut(QtGui.QKeySequence(QtGui.Qt.Key.Key_Escape), self, self._esc)
 
+        # Connect the confirm signal for the landing view to the _switch_to_viewer func
         self.landing.confirm_sig.connect(self._switch_to_viewer)
 
         self.image_viewer = ImageViewer()
@@ -84,7 +85,11 @@ class PhotoPrune(QtWidgets.QWidget):
 
     @QtCore.Slot(str, bool, bool)
     def _switch_to_viewer(
-        self, folder: str, include_std_img: bool, include_raw_img: bool
+        self,
+        folder: str,
+        include_std_img: bool,
+        include_raw_img: bool,
+        prune_similar: bool,
     ):
         def _err(m: str):
             _msg_box = QtWidgets.QMessageBox()
@@ -107,6 +112,7 @@ class PhotoPrune(QtWidgets.QWidget):
 
         self.image_viewer.include_standard_images(include_std_img)
         self.image_viewer.include_raw_images(include_raw_img)
+        self.image_viewer.enable_prune_similar(prune_similar)
 
         try:
             self.image_viewer.load_folder(folder)

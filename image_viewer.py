@@ -241,9 +241,11 @@ class GraphicsView(QtWidgets.QGraphicsView):
     def _log_view_sizes(self):
         logging.debug(f"GFXVIEW size {str(self.size())}")
         logging.debug(f"SCENE size {str(self.scene().sceneRect())}")
-        logging.debug(
-            f"PIXMAP size {str(self._pixmap_in_scene.pixmap().size())}"
-        ) if self._pixmap_in_scene else None
+        (
+            logging.debug(f"PIXMAP size {str(self._pixmap_in_scene.pixmap().size())}")
+            if self._pixmap_in_scene
+            else None
+        )
 
     def _fill_parent(self):
         self.resize(self.parentWidget().size())
@@ -304,6 +306,7 @@ class ImageViewer(QtWidgets.QWidget):
     _current_file: tuple[int, str] | None = None
     _include_standard_image_ext: bool = True
     _include_raw_image_ext: bool = False
+    _prune_similar: bool = False
     _time_image_last_loaded_s: float | None = None
     _image_load_timer: QtCore.QTimer | None = None
 
@@ -479,7 +482,6 @@ class ImageViewer(QtWidgets.QWidget):
 
         return new_image
 
-
     def load_file(self, fpath: str, index: int):
         if not self._gfxview or not self._image_load_timer:
             raise Exception
@@ -599,6 +601,7 @@ class ImageViewer(QtWidgets.QWidget):
         def make_func(_fn, *_params):
             def new_fn():
                 _fn(*_params)
+
             return new_fn
 
         preload_funcs = []
@@ -609,7 +612,9 @@ class ImageViewer(QtWidgets.QWidget):
             if window_end + 1 < len(self._ordered_files):
                 window_end += 1
                 preload_funcs.append(
-                    make_func(self.qimage_from_file_auto, self._ordered_files[window_end])
+                    make_func(
+                        self.qimage_from_file_auto, self._ordered_files[window_end]
+                    )
                 )
                 window_size += 1
 
@@ -617,7 +622,9 @@ class ImageViewer(QtWidgets.QWidget):
             if window_size < IMAGE_PRELOAD_MAX and window_start - 1 >= 0:
                 window_start -= 1
                 preload_funcs.append(
-                    make_func(self.qimage_from_file_auto, self._ordered_files[window_start])
+                    make_func(
+                        self.qimage_from_file_auto, self._ordered_files[window_start]
+                    )
                 )
                 window_size += 1
 
@@ -686,6 +693,32 @@ class ImageViewer(QtWidgets.QWidget):
         self.load_file(self._ordered_files[prev_idx], prev_idx)
         # self.preload()
 
+    def _discard_files(self, paths: list[str]):
+        """Move files from `paths` to nested 'pruned' folder"""
+        if self._cwd is None:
+            raise Exception
+
+        pruned_folder_path = self._get_pruned_folder_path()
+        dsts = [os.path.join(pruned_folder_path, os.path.basename(p)) for p in paths]
+        os.makedirs(pruned_folder_path, exist_ok=True)
+        for i in range(len(paths)):
+            os.rename(paths[i], dsts[i])
+        logging.info(f"Moved {paths} to {dsts}")
+
+    def _all_similar_files(self, path: str) -> list[str]:
+        """
+        Returns a list of all paths to files with the same name (ignoring ext).
+        """
+        similar = []
+        d, basename = os.path.split(path)
+        basename_no_ext = os.path.splitext(basename)[0]
+        with os.scandir(d) as scanner:
+            for f in scanner:
+                if f.is_file() and os.path.splitext(os.path.basename(f))[0] == basename_no_ext:
+                    similar.append(f.path)
+        
+        return similar
+
     def _discard_current_photo(self):
         """
         Skip to next photo and discard skipped photo into "pruned" folder.
@@ -693,18 +726,8 @@ class ImageViewer(QtWidgets.QWidget):
         if self._current_file is None:
             raise Exception
 
-        def _discard(_path: str):
-            """Move file to nested `pruned` folder"""
-            if self._cwd is None:
-                raise Exception
-
-            _pruned_folder_path = self._get_pruned_folder_path()
-            _dst = os.path.join(_pruned_folder_path, os.path.basename(_path))
-            os.makedirs(_pruned_folder_path, exist_ok=True)
-            os.rename(_path, _dst)
-            logging.info(f"Moved {_path} to {_dst}")
-
-        discarded_file = self._current_file
+        # We don't need index
+        _, discarded_file = self._current_file
 
         # Remove from self._ordered_files
         self._ordered_files.pop(self._current_file[0])
@@ -718,14 +741,14 @@ class ImageViewer(QtWidgets.QWidget):
             next_idx = self._current_file[0] - 1
         else:
             logging.info("No images left to prune")
-            _discard(discarded_file[1])
+            self._discard_files([discarded_file] if not self._prune_similar else self._all_similar_files(discarded_file))
             self._no_more_images()
             return
 
         self._current_file = next_idx, self._ordered_files[next_idx]
         self.load_file(self._ordered_files[next_idx], next_idx)
 
-        _discard(discarded_file[1])
+        self._discard_files([discarded_file] if not self._prune_similar else self._all_similar_files(discarded_file))
         self._scan_cwd()
 
     def _no_more_images(self):
@@ -762,3 +785,7 @@ class ImageViewer(QtWidgets.QWidget):
     def include_standard_images(self, include: bool):
         self._include_standard_image_ext = include
         logging.info(f"{'In' if include else 'Ex'}cluding standard images")
+
+    def enable_prune_similar(self, enable: bool):
+        self._prune_similar = enable
+        logging.info(f"{'En' if enable else 'Dis'}abling prune similar")
